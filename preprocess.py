@@ -120,7 +120,7 @@ def main(opt):
         out_img['file_path'] = img_save_path
 
         # resize the image into (256,256) and save it in the data directory
-        # assert resize_image(img_path, img_save_path, i+1, len(imgs)), 'failed resizing image %s - see http://git.io/vBIE0' % (img['file_path'])
+        assert resize_image(img_path, img_save_path, i+1, len(imgs)), 'failed resizing image %s - see http://git.io/vBIE0' % (img['file_path'])
 
         for i, sentence in enumerate(img['sentences']):
             out_img['final_caption'] = sentence['tokens']
@@ -144,12 +144,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # input and output file configuration
-    parser.add_argument('--caption_json', required=True, help='input json file to create vocabulary')
+    parser.add_argument('--caption_json', default='data/datasets/dataset_coco.json', help='input json file to create vocabulary')
     parser.add_argument('--output_json', type=str, default='data/data.json', help ='save path for annotation json file with additional information')
     parser.add_argument('--vocab_path', type=str, default='data/vocab.pkl', help='path for saving vocabulary wrapper')
 
     # options
-    parser.add_argument('--images_root', required=True, help='root location in which images are stored, to be prepended to file_path in input json')
+    parser.add_argument('--images_root', default='/home/gt/D_Data/COCO', help='root location in which images are stored, to be prepended to file_path in input json')
     parser.add_argument('--word_count_threshold', default=5, type=int, help='only words that occur more than this number of times will be put in vocab')
     parser.add_argument('--print_stats', action="store_true", default=False, help='print out the stats of the mscoco captioning annotations')
 

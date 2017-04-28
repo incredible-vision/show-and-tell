@@ -40,16 +40,15 @@ class CocoDataset(data.Dataset):
 
         target = torch.IntTensor(caption)
 
-        return img, target
+        return img, target, data[index]['imgid']
 
     def __len__(self):
         return len(self.data)
 
-
 def collate_fn(data):
     # sort the data in descending order
     data.sort(key=lambda x: len(x[1]), reverse=True)
-    images, captions = zip(*data)
+    images, captions, imgids = zip(*data)
 
     # merge images (from tuple of 3D tensor to 4D tensor).
     images = torch.stack(images, 0)
@@ -60,13 +59,15 @@ def collate_fn(data):
     for i, cap in enumerate(captions):
         end = lengths[i]
         targets[i, :end] = cap[:end]
-    return images, targets, lengths
+    return images, targets, lengths, imgids
 
-def get_loader(opt, shuffle=True, num_workers=1, transform=None):
+
+def get_loader(opt, mode='train', shuffle=True, num_workers=1, transform=None):
 
     coco = CocoDataset(root=opt.root_dir,
                        anns=opt.data_json,
                        vocab=opt.vocab_path,
+                       mode=mode,
                        transform=transform)
     data_loader = torch.utils.data.DataLoader(dataset=coco,
                                               batch_size=opt.batch_size,
@@ -76,12 +77,11 @@ def get_loader(opt, shuffle=True, num_workers=1, transform=None):
 
     return data_loader
 
-
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--root_dir', type=str, default='/home/myunggi/Research/show-and-tell', help="root directory of the project")
+    parser.add_argument('--root_dir', type=str, default='/home/gt/PycharmProjects/show-and-tell', help="root directory of the project")
     parser.add_argument('--data_json', type=str, default='data/data.json', help='input data list which includes captions and image information')
     parser.add_argument('--vocab_path', type=str, default='data/vocab.pkl', help='vocabulary wrapper')
     parser.add_argument('--crop_size', type=int, default=224, help='image crop size')
