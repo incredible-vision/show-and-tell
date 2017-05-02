@@ -40,7 +40,7 @@ class CocoDataset(data.Dataset):
 
         target = torch.IntTensor(caption)
 
-        return img, target, data[index]['imgid']
+        return img, target, data[index]['cocoid'] # data[index]['imgid']
 
     def __len__(self):
         return len(self.data)

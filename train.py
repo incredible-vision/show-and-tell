@@ -8,7 +8,7 @@ import pickle
 import json
 from data_loader import get_loader
 from utils import Vocabulary
-from models import EncoderCNN, DecoderRNN
+from models import EncoderCNN, PG_DecoderRNN
 from torch.autograd import Variable
 import torch.optim as optim
 from torch.nn.utils.rnn import pack_padded_sequence
@@ -34,8 +34,7 @@ class Trainer(object):
             self.vocab = pickle.load(f)
 
         self.encoder = EncoderCNN(opt.embed_size)
-        self.decoder = DecoderRNN(opt.embed_size, opt.hidden_size,
-                                  len(self.vocab), opt.num_layers)
+        self.decoder = PG_DecoderRNN(opt.embed_size, opt.hidden_size, len(self.vocab), opt.num_layers)
 
         if self.num_gpu == 1:
             self.encoder.cuda()
@@ -89,7 +88,7 @@ class Trainer(object):
                 self.opt.ss_prob = min(self.opt.scheduled_sampling_increase_prob * fraction, self.opt.scheduled_sampling_max_prob)
                 self.decoder.ss_prob = self.opt.ss_prob
 
-            for iter, (images, captions, lengths, imgids) in enumerate(self.trainloader):
+            for iter, (images, captions, lengths, coco_imgids) in enumerate(self.trainloader):
 
                 torch.cuda.synchronize()
                 start = time.time()
@@ -103,11 +102,29 @@ class Trainer(object):
                     captions = captions.cuda()
 
                 targets = pack_padded_sequence(captions, lengths, batch_first=True)[0]
+
                 # Forward, Backward and Optimize
                 self.decoder.zero_grad()
                 self.encoder.zero_grad()
                 features = self.encoder(images)
-                outputs = self.decoder(features, captions, lengths)
+                actions, Q_s = self.decoder(features, captions, lengths, coco_imgids, self.vocab)
+
+                ########## Policy gradient Optimize ##########
+
+                for action, Q in zip(actions, Q_s):
+                    action.reinforce(Q)
+                torch.autograd.backward(actions, [None for _ in actions])
+
+                self.optimizer.step()
+                torch.cuda.synchronize()
+                end = time.time()
+
+                if iter % self.opt.log_step == 0:
+                    print('Epoch [%d/%d], Step [%d/%d], Avg Rewards: %.4f'
+                    % (epoch, self.opt.max_epochs, iter, self.total_train_iter, Q_s.mean()))
+
+                ########## Original XE loss Optimize ##########
+                '''
                 loss = self.criterion(outputs, targets)
                 loss.backward()
                 clip_gradient(self.optimizer, self.opt.grad_clip)
@@ -120,6 +137,7 @@ class Trainer(object):
                     print('Epoch [%d/%d], Step [%d/%d], Loss: %.4f, Perplexity: %5.4f'
                           % (epoch, self.opt.max_epochs, iter, self.total_train_iter,
                              loss.data[0], np.exp(loss.data[0])))
+                '''
 
                 # Write the training loss summary
                 # if (iter % self.opt.losses_log_every == 0):
@@ -128,7 +146,7 @@ class Trainer(object):
                 #     self.ss_prob_history[iter] = self.decoder.ss_prob
 
                 # make evaluation on validation set, and save model
-                if (iter % self.opt.save_checkpoint_every == 0):
+                if (iter+1 % self.opt.save_checkpoint_every == 0):
                     val_loss, predictions, lang_stats = evaluation(self.encoder, self.decoder, self.criterion, self.validloader, self.vocab, self.opt)
 
 
