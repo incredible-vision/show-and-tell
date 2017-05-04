@@ -15,7 +15,6 @@ from torch.nn.utils.rnn import pack_padded_sequence
 from torchvision import transforms
 from eval import evaluation
 
-
 class Trainer(object):
     def __init__(self, opt, trainloader, validloader):
         self.opt = opt
@@ -59,10 +58,27 @@ class Trainer(object):
     def load_model(self):
         """"""
 
-    def load_optimizer(self):
-        """"""
+    def load_optimizer(self, optimizer):
+        return optimizer.load_state_dict(torch.load(os.path.join(self.opt.start_from, 'optimizer.pth')))
 
     def train(self):
+
+        infos = {}
+        if self.opt.start_from is not None:
+            # open old infos and check if models are compatible
+            with open(os.path.join(self.opt.expr_dir, 'infos' + '.pkl')) as f:
+                infos = pickle.load(f)
+
+        total_iteration = infos.get('total_iter', 0)
+        loaded_iteration = infos.get('iter', 0)
+        loaded_epoch = infos.get('epoch', 1)
+        val_result_history = infos.get('val_result_history', {})
+        loss_history = infos.get('loss_history', {})
+        lr_history = infos.get('lr_history', {})
+
+        # loading a best validation score
+        if self.opt.load_best_score == True:
+            best_val_score = infos.get('best_val_score', None)
 
         def clip_gradient(optimizer, grad_clip):
             for group in optimizer.param_groups:
@@ -74,6 +90,8 @@ class Trainer(object):
                 group['lr'] = lr
 
         for epoch in range(1, 1 + self.opt.max_epochs):
+            if epoch < loaded_epoch:
+                continue
 
             if epoch > self.opt.learning_rate_decay_start and self.opt.learning_rate_decay_start >= 1:
                 fraction = (epoch - self.opt.learning_rate_decay_start) // self.opt.learning_rate_decay_every
@@ -90,6 +108,11 @@ class Trainer(object):
                 self.decoder.ss_prob = self.opt.ss_prob
 
             for iter, (images, captions, lengths, imgids) in enumerate(self.trainloader):
+                iter += 1
+                total_iteration += 1
+                if iter <= loaded_iteration:
+                    continue
+
 
                 torch.cuda.synchronize()
                 start = time.time()
@@ -121,19 +144,49 @@ class Trainer(object):
                           % (epoch, self.opt.max_epochs, iter, self.total_train_iter,
                              loss.data[0], np.exp(loss.data[0])))
 
-                # Write the training loss summary
-                # if (iter % self.opt.losses_log_every == 0):
-                #     self.loss_history[iter] = loss.data[0]
-                #     self.lr_history[iter] = self.decoder.current_lr
-                #     self.ss_prob_history[iter] = self.decoder.ss_prob
-
                 # make evaluation on validation set, and save model
-                if (iter % self.opt.save_checkpoint_every == 0):
+                if (total_iteration % self.opt.save_checkpoint_every == 0):
                     val_loss, predictions, lang_stats = evaluation(self.encoder, self.decoder, self.criterion, self.validloader, self.vocab, self.opt)
+                    val_result_history[total_iteration] = {'loss': val_loss, 'lang_stats': lang_stats, 'predictions': predictions}
+
+                    # Write the training loss summary
+                    # loss_history[total_iteration] = loss.data[0].cpu().numpy()[0]
+                    loss_history[total_iteration] = loss.data[0]
+                    lr_history[total_iteration] = self.opt.current_lr
+
+                    # Save model if is improving on validation result
+                    if self.opt.language_eval == 1:
+                        current_score = lang_stats['CIDEr']
+                    else:
+                        current_score = - val_loss
+
+                    best_flag = False
+                    if best_val_score is None or current_score > best_val_score:
+                        best_val_score = current_score
+                        best_flag = True
+
+                    # Dump miscalleous informations
+                    infos['total_iter'] = total_iteration
+                    infos['iter'] = iter
+                    infos['epoch'] = epoch
+                    infos['best_val_score'] = best_val_score
+                    infos['opt'] = self.opt
+                    infos['val_result_history'] = val_result_history
+                    infos['loss_history'] = loss_history
+                    infos['lr_history'] = lr_history
+                    with open(os.path.join(self.opt.expr_dir, 'infos' + '.pkl'), 'wb') as f:
+                        pickle.dump(infos, f)
+
+                    if best_flag:
+                        checkpoint_path = os.path.join(self.opt.expr_dir, 'model-best.pth')
+                        # torch.save(model.state_dict(), checkpoint_path)
+                        print("model saved to {}".format(self.opt.expr_dir))
+                        with open(os.path.join(self.opt.expr_dir, 'infos' + '-best.pkl'), 'wb') as f:
+                            pickle.dump(infos, f)
+
 
 
 if __name__ == '__main__':
-
 
     parser = argparse.ArgumentParser()
 
