@@ -32,9 +32,9 @@ class ShowAttendTellModel(nn.Module):
 
         """ define output MLP for word selecting"""
         self.mlp_w = nn.Parameter(torch.FloatTensor(hidden_size, 1))
-        self.linear = nn.Linear(hidden_size, vocab_size,bias=True)
-        self.w_context = nn.Linear(context_size, hidden_size)
-        self.w_hidden = nn.Linear(hidden_size, hidden_size)
+        self.linear = nn.Linear(embed_size, vocab_size, bias=True)
+        self.w_context = nn.Linear(context_size, embed_size)
+        self.w_hidden = nn.Linear(hidden_size, embed_size)
 
 
     def forward(self, images, captions, lengths):
@@ -79,8 +79,8 @@ class ShowAttendTellModel(nn.Module):
     def out_select(self, context, hidden):
         context = self.w_context(context)
         hidden = self.w_hidden(hidden)
-        #out = self.linear(hidden+context)
-        out = F.softmax(hidden+context)
+        out = self.linear(hidden+context)
+        out = F.softmax(out)
         return out
 
     def finetune(self, allow=False):
