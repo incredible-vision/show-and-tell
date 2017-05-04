@@ -33,7 +33,8 @@ class ShowAttendTellModel(nn.Module):
         """ define output MLP for word selecting"""
         self.mlp_w = nn.Parameter(torch.FloatTensor(hidden_size, 1))
         self.linear = nn.Linear(hidden_size, vocab_size,bias=True)
-
+        self.w_context = nn.Linear(context_size, hidden_size)
+        self.w_hidden = nn.Linear(hidden_size, hidden_size)
 
 
     def forward(self, images, captions, lengths):
@@ -42,18 +43,20 @@ class ShowAttendTellModel(nn.Module):
         features = features.view(features.size(0), features.size(1), -1).transpose(2, 1) # [batch, 196, 512]
         context_encode = torch.bmm(features, self.image_att_w.unsqueeze(0).expand(features.size(0), self.image_att_w.size(0), self.image_att_w.size(1))) # [batch, 196, 512]
         hidden, c = self.init_lstm(features)
+        embeddings = self.embed(captions)
+        packed, batch_sizes = pack_padded_sequence(embeddings, lengths, batch_first=True)
+
         alpha_list = []
         out = []
         hiddens = []
-        embeddings = self.embed(captions)
-        packed, batch_sizes = pack_padded_sequence(embeddings, lengths, batch_first=True)
+
         for t, batch_size in enumerate(batch_sizes):
             embedding = embeddings[:batch_size, t, :]
             context, alpha = self.attention_layer(features[:batch_size], context_encode[:batch_size], hidden[:batch_size])
             embedding = torch.cat([embedding, context], 1)
             hidden, c = self.lstmcell(embedding, (hidden[:batch_size], c[:batch_size]))
             alpha_list.append(alpha)
-            out.append(self.out_select(c, hidden))
+            out.append(self.out_select(context, hidden))
             hiddens.append(hidden)
         out = torch.cat(out, dim=0)
         print(len(features))
@@ -73,9 +76,11 @@ class ShowAttendTellModel(nn.Module):
         context = (features * alpha.unsqueeze(2).expand_as(features)).mean(1).squeeze(1)
         return context, alpha
 
-    def out_select(self, c, hidden):
-        out = self.linear(hidden+c)
-        out = F.softmax(out)
+    def out_select(self, context, hidden):
+        context = self.w_context(context)
+        hidden = self.w_hidden(hidden)
+        #out = self.linear(hidden+context)
+        out = F.softmax(hidden+context)
         return out
 
     def finetune(self, allow=False):
@@ -89,6 +94,7 @@ res = model(data, caption, [10, 9, 7, 6, 4, 3, 3, 1, 1, 1])
 
 if __name__ == "__main__":
     """"""
+
 
 
 
