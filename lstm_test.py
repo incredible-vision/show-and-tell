@@ -5,6 +5,8 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from torchvision.models import vgg16
 import math
+from torch.nn.utils.rnn import pack_padded_sequence
+
 
 class ShowAttendTellModel(nn.Module):
 
@@ -26,32 +28,37 @@ class ShowAttendTellModel(nn.Module):
 
         """ define decoder, use lstm cell for reproducing """
         self.embed = nn.Embedding(vocab_size, embed_size)
-        self.lstmcell = nn.LSTMCell(context_size, hidden_size)
+        self.lstmcell = nn.LSTMCell(hidden_size, hidden_size)
 
         """ define output MLP for word selecting"""
         self.mlp_w = nn.Parameter(torch.FloatTensor(hidden_size, 1))
-        self.linear = nn.Linear(context_size, vocab_size)
+        self.linear = nn.Linear(hidden_size, vocab_size,bias=True)
 
 
 
-    def forward(self, images, captions):
+    def forward(self, images, captions, lengths):
         """ put input data through cnn """
         features = self.encoder(images) # [batch, 512, 14, 14]
         features = features.view(features.size(0), features.size(1), -1).transpose(2, 1) # [batch, 196, 512]
         context_encode = torch.bmm(features, self.image_att_w.unsqueeze(0).expand(features.size(0), self.image_att_w.size(0), self.image_att_w.size(1))) # [batch, 196, 512]
         hidden, c = self.init_lstm(features)
         alpha_list = []
-        for t in range(self.opt.time_step):
-            captions_cur = captions[:, t, :]
-            embedding = self.embed(captions_cur)
-            context, alpha = self.attention_layer(features, context_encode, h)
-            embedding = torch.cat(embedding, context, 1)
+        out = []
+        hiddens = []
+        embeddings = self.embed(captions)
+        packed, batch_sizes = pack_padded_sequence(embeddings, lengths, batch_first=True)
+        for t, batch_size in enumerate(batch_sizes):
+            embedding = embeddings[:batch_size, t, :]
+            context, alpha = self.attention_layer(features[:batch_size], context_encode[:batch_size], hidden[:batch_size])
+            embedding = torch.cat([embedding, context], 1)
+            hidden, c = self.lstmcell(embedding, (hidden[:batch_size], c[:batch_size]))
             alpha_list.append(alpha)
-            h, c = self.lstmcell(embedding, hidden)
-            context, beta = self.out_select(context, h)
-            outputs = self.linear(context)
+            out.append(self.out_select(c, hidden))
+            hiddens.append(hidden)
+        out = torch.cat(out, dim=0)
         print(len(features))
-        return features, outputs
+
+        return features, out
 
     def init_lstm(self, features):
         features_mean = features.mean(1).squeeze(1)
@@ -66,11 +73,23 @@ class ShowAttendTellModel(nn.Module):
         context = (features * alpha.unsqueeze(2).expand_as(features)).mean(1).squeeze(1)
         return context, alpha
 
-    def out_select(self, context, h):
-        beta = nn.Sigmoid((self.mlp_w).dot(h))
-        context = torch.mul(context,beta)
-        return context, beta
+    def out_select(self, c, hidden):
+        out = self.linear(hidden+c)
+        out = F.softmax(out)
+        return out
 
     def finetune(self, allow=False):
         for param in self.encoder.parameters():
             param.requires_grad = True if allow else False
+
+model = ShowAttendTellModel(hidden_size=1024, context_size=512, vocab_size=10000, embed_size=512, opt=1).cuda()
+data = Variable(torch.FloatTensor(torch.rand([10, 3, 224, 224]))).cuda()
+caption = Variable(torch.ones([10, 20])).long().cuda()
+res = model(data, caption, [10, 9, 7, 6, 4, 3, 3, 1, 1, 1])
+
+if __name__ == "__main__":
+    """"""
+
+
+
+
