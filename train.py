@@ -9,11 +9,13 @@ import json
 from data_loader import get_loader
 from utils import Vocabulary
 from models import EncoderCNN, DecoderRNN
+from model2 import ShowAttendTellModel
 from torch.autograd import Variable
 import torch.optim as optim
 from torch.nn.utils.rnn import pack_padded_sequence
 from torchvision import transforms
 from eval import evaluation
+
 
 class Trainer(object):
     def __init__(self, opt, trainloader, validloader):
@@ -32,39 +34,35 @@ class Trainer(object):
         with open(opt.vocab_path, 'rb') as f:
             self.vocab = pickle.load(f)
 
-        self.encoder = EncoderCNN(opt.embed_size)
-        self.decoder = DecoderRNN(opt.embed_size, opt.hidden_size,
-                                  len(self.vocab), opt.num_layers)
+        self.model = ShowAttendTellModel(opt.hidden_size, opt.embed_size, len(self.vocab), opt.embed_size, opt)
 
         if self.num_gpu == 1:
-            self.encoder.cuda()
-            self.decoder.cuda()
+            self.model.cuda()
 
         elif self.num_gpu > 1:
-            self.encoder = nn.DataParallel(self.encoder.cuda(), device_ids=range(self.num_gpu))
-            self.decoder = nn.DataParallel(self.decoder.cuda(), device_ids=range(self.num_gpu))
+            self.model = nn.DataParallel(self.model.cuda(), device_ids=range(self.num_gpu))
 
-        if self.load_model_path:
+        if self.opt.start_from is not None or self.opt.load_pretrained:
             self.load_model()
-
-        if self.load_optimizer_path:
             self.load_optimizer()
 
         self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = optim.Adam(list(self.encoder.resnet.fc.parameters())+list(self.decoder.parameters()), lr=opt.learning_rate)
+
+        parameters = filter(lambda p: p.requires_grad, self.model.parameters())
+        self.optimizer = optim.Adam(parameters, lr=opt.learning_rate)
 
         print('done')
 
     def load_model(self):
-        """"""
+        return self.model.load_state_dict(torch.load(os.path.join(self.opt.expr_dir, 'model.pth')))
 
-    def load_optimizer(self, optimizer):
-        return optimizer.load_state_dict(torch.load(os.path.join(self.opt.start_from, 'optimizer.pth')))
+    def load_optimizer(self):
+        return self.optimizer.load_state_dict(torch.load(os.path.join(self.opt.expr_dir, 'optimizer.pth')))
 
     def train(self):
 
         infos = {}
-        if self.opt.start_from is not None:
+        if self.opt.start_from is not None and not self.opt.load_pretrained:
             # open old infos and check if models are compatible
             with open(os.path.join(self.opt.expr_dir, 'infos' + '.pkl')) as f:
                 infos = pickle.load(f)
@@ -101,18 +99,18 @@ class Trainer(object):
             else:
                 self.opt.current_lr = self.opt.learning_rate
 
-            # Assign the scheduled sampling prob
-            if epoch > self.opt.scheduled_sampling_start and self.opt.scheduled_sampling_start >= 0:
-                fraction = (epoch - self.opt.scheduled_sampling_start) // self.opt.scheduled_sampling_increase_every
-                self.opt.ss_prob = min(self.opt.scheduled_sampling_increase_prob * fraction, self.opt.scheduled_sampling_max_prob)
-                self.decoder.ss_prob = self.opt.ss_prob
+            # # Assign the scheduled sampling prob
+            # if epoch > self.opt.scheduled_sampling_start and self.opt.scheduled_sampling_start >= 0:
+            #     fraction = (epoch - self.opt.scheduled_sampling_start) // self.opt.scheduled_sampling_increase_every
+            #     self.opt.ss_prob = min(self.opt.scheduled_sampling_increase_prob * fraction, self.opt.scheduled_sampling_max_prob)
+            #     self.decoder.ss_prob = self.opt.ss_prob
 
             for iter, (images, captions, lengths, imgids) in enumerate(self.trainloader):
+
                 iter += 1
                 total_iteration += 1
                 if iter <= loaded_iteration:
                     continue
-
 
                 torch.cuda.synchronize()
                 start = time.time()
@@ -125,12 +123,11 @@ class Trainer(object):
                     images = images.cuda()
                     captions = captions.cuda()
 
-                targets = pack_padded_sequence(captions, lengths, batch_first=True)[0]
+                lengths = [l-1 for l in lengths]
+                targets = pack_padded_sequence(captions[:,1:], lengths, batch_first=True)[0]
                 # Forward, Backward and Optimize
-                self.decoder.zero_grad()
-                self.encoder.zero_grad()
-                features = self.encoder(images)
-                outputs = self.decoder(features, captions, lengths)
+                self.model.zero_grad()
+                outputs = self.model(images, captions[:,:-1], lengths)
                 loss = self.criterion(outputs, targets)
                 loss.backward()
                 clip_gradient(self.optimizer, self.opt.grad_clip)
@@ -146,8 +143,10 @@ class Trainer(object):
 
                 # make evaluation on validation set, and save model
                 if (total_iteration % self.opt.save_checkpoint_every == 0):
-                    val_loss, predictions, lang_stats = evaluation(self.encoder, self.decoder, self.criterion, self.validloader, self.vocab, self.opt)
-                    val_result_history[total_iteration] = {'loss': val_loss, 'lang_stats': lang_stats, 'predictions': predictions}
+                    val_loss, predictions, lang_stats = evaluation(self.model, self.criterion,
+                                                                   self.validloader, self.vocab, self.opt)
+                    val_result_history[total_iteration] = {'loss': val_loss, 'lang_stats': lang_stats,
+                                                           'predictions': predictions}
 
                     # Write the training loss summary
                     # loss_history[total_iteration] = loss.data[0].cpu().numpy()[0]
@@ -165,6 +164,12 @@ class Trainer(object):
                         best_val_score = current_score
                         best_flag = True
 
+                    checkpoint_path = os.path.join(self.opt.expr_dir, 'model.pth')
+                    torch.save(self.model.state_dict(), checkpoint_path)
+                    print("model saved to {}".format(checkpoint_path))
+                    optimizer_path = os.path.join(self.opt.expr_dir, 'optimizer.pth')
+                    torch.save(self.optimizer.state_dict(), optimizer_path)
+
                     # Dump miscalleous informations
                     infos['total_iter'] = total_iteration
                     infos['iter'] = iter
@@ -179,12 +184,10 @@ class Trainer(object):
 
                     if best_flag:
                         checkpoint_path = os.path.join(self.opt.expr_dir, 'model-best.pth')
-                        # torch.save(model.state_dict(), checkpoint_path)
+                        torch.save(self.model.state_dict(), checkpoint_path)
                         print("model saved to {}".format(self.opt.expr_dir))
                         with open(os.path.join(self.opt.expr_dir, 'infos' + '-best.pkl'), 'wb') as f:
                             pickle.dump(infos, f)
-
-
 
 if __name__ == '__main__':
 
@@ -212,4 +215,3 @@ if __name__ == '__main__':
     parser.add_argument('--learning_rate', type=float, default=0.001)
     args = parser.parse_args()
     print(json.dumps(vars(args), indent=2))
-    main(args)
