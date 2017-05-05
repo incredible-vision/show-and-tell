@@ -96,15 +96,15 @@ class ShowAttendTellModel(nn.Module):
         context_encode = torch.bmm(features, self.image_att_w.unsqueeze(0).expand(features.size(0), self.image_att_w.size(0), self.image_att_w.size(1)))  # [batch, 196, 512]
         hidden , c = states
         for i in range(20):  # maximum sampling length
-            context, alpha = self.attention_layer(features, context_encode,
-                                                  hidden)
+            context, alpha = self.attention_layer(features, context_encode, hidden)
             if i == 0:
                 rnn_input = torch.cat([embeddings, context], dim=1)
             hidden, c = self.lstmcell(rnn_input, (hidden, c))  # (batch_size, 1, hidden_size)
             outputs = self.output_layer(context, hidden)  # (batch_size, vocab_size)
             predicted = outputs.max(1)[1]
             sampled_ids.append(predicted)
-            rnn_input = self.embedding(predicted)
+            embedding = self.embedding(predicted).squeeze(1)
+            rnn_input = torch.cat([embedding, context], dim=1)
         sampled_ids = torch.cat(sampled_ids, 1)  # (batch_size, 20)
         return sampled_ids.squeeze()
 
