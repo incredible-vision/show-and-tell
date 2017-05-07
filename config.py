@@ -20,10 +20,11 @@ def parse_opt():
 
     parser.add_argument('--expr_dir', type=str, default='experiment', help='experiment directory')
     parser.add_argument('--exp_id', type=int, default=1, help='experiment id')
+    parser.add_argument('--user_id', type=str, default='gt', help='user id')
     parser.add_argument('--start_from', type=str, default=None, help='continue from this configurations')
 
-    parser.add_argument('--embed_size', type=int, default=256, help='dimension of word embedding vectors')
-    parser.add_argument('--hidden_size', type=int, default=512, help='dimension of lstm hidden states')
+    parser.add_argument('--embed_size', type=int, default=512, help='dimension of word embedding vectors')
+    parser.add_argument('--hidden_size', type=int, default=1024, help='dimension of lstm hidden states')
     parser.add_argument('--num_layers', type=int, default=1, help='number of layers in lstm')
 
     parser.add_argument('--load_best_score', action="store_true", default=True)
@@ -51,7 +52,7 @@ def parse_opt():
                         help='Maximum scheduled sampling prob.')
 
     parser.add_argument('--log_step', type=int, default=10, help='step size for printing log info')
-    parser.add_argument('--save_checkpoint_every', type=int, default=1000,
+    parser.add_argument('--save_checkpoint_every', type=int, default=10,
                         help='how often to save a model checkpoint (in iterations)?')
 
 

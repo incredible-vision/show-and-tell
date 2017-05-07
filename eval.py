@@ -22,7 +22,7 @@ def language_eval(preds):
     from pycocotools.coco import COCO
     from pycocoevalcap.eval import COCOEvalCap
 
-    # encoder.FLOAT_REPR = lambda o: format(o, '.3f')
+    encoder.FLOAT_REPR = lambda o: format(o, '.3f')
 
     random.seed(time.time())
     tmp_name = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(6))
@@ -51,13 +51,12 @@ def language_eval(preds):
 
     return out
 
-def evaluation(encoder, decoder, crit, loader, vocab, opt):
+def evaluation(model, crit, loader, vocab, opt):
     verbose = True
     val_images_use = -1
     lang_eval = 1
 
-    encoder.eval()
-    decoder.eval()
+    model.eval()
 
     loss_sum = 0
     loss_evals = 0
@@ -71,26 +70,26 @@ def evaluation(encoder, decoder, crit, loader, vocab, opt):
         # Set mini-batch dataset
         images = Variable(images, volatile=True)
         captions = Variable(captions, volatile=True)
-        state = (Variable(torch.zeros(opt.num_layers, images.size(0), opt.hidden_size), volatile=True),
-                 Variable(torch.zeros(opt.num_layers, images.size(0), opt.hidden_size), volatile=True))
+        state = (Variable(torch.zeros(images.size(0), opt.hidden_size), volatile=True),
+                 Variable(torch.zeros(images.size(0), opt.hidden_size), volatile=True))
 
         if opt.num_gpu > 0:
             images = images.cuda()
             captions = captions.cuda()
-            state = [s.cuda() for s in state]
+            state = torch.stack([s.cuda() for s in state])
 
         targets = pack_padded_sequence(captions, lengths, batch_first=True)[0]
 
-        features = encoder(images)
-        outputs = decoder(features, captions, lengths)
-        sampled_ids = decoder.sample(features, state)
-        loss = crit(outputs, targets)
+        outputs = model(images, captions, lengths)
 
+        loss = crit(outputs, targets)
         loss_sum = loss_sum + loss
         loss_evals = loss_evals + 1
 
+        sampled_ids = model.sample(images, state)
         sampled_ids = sampled_ids.cpu().data.numpy()
         result_sentences = []
+
         for sentence_ids in sampled_ids:
             sampled_caption = []
             for word_id in sentence_ids:
@@ -100,15 +99,14 @@ def evaluation(encoder, decoder, crit, loader, vocab, opt):
                 sampled_caption.append(word)
             sentence = ' '.join(sampled_caption)
             result_sentences.append(sentence)
-
         for i, sentence in enumerate(result_sentences):
             if imgids[i] in check_duplicate:
                 continue
             else:
                 check_duplicate.append(imgids[i])
-                entry = {'image_id': imgids[i], 'caption': sentence}
-                predictions.append(entry)
+            entry = {'image_id': imgids[i], 'caption': sentence}
+            predictions.append(entry)
 
     lang_stats = language_eval(predictions)
 
-    print('done')
+    return loss_sum / loss_evals, predictions, lang_stats

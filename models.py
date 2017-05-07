@@ -115,10 +115,19 @@ class PG_DecoderRNN(nn.Module):
         outputs = self.linear(hiddens[0])
 
         _, actions = torch.max(outputs, 1)
+        actions = torch.split(actions, 1, dim=0)
 
         Q_s = self.generate_rewards(outputs, captions, imgids, packed_info, vocab)
+        Q_s = self.sorting_Q_s(Q_s, lengths)
 
         return actions, Q_s
+
+    def sorting_Q_s(self, Q_s, lengths):
+        new_Q_s = []
+        for i, l in enumerate(lengths):
+            Q_s[:, i]
+
+        return new_Q_s
 
     def generate_rewards(self, outputs, captions, imgids, packed_info, vocab):
 
