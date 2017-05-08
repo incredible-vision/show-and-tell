@@ -66,7 +66,11 @@ class Trainer(object):
     def train(self):
 
         infos = {}
+<<<<<<< HEAD
         if self.opt.start_from is not None and not self.opt.load_pretrained:
+=======
+        if self.opt.start_from is not None:
+>>>>>>> 6574f0497ef19d015f8acfdffb4f1f166ed54cfa
             # open old infos and check if models are compatible
             with open(os.path.join(self.opt.expr_dir, 'infos' + '.pkl')) as f:
                 infos = pickle.load(f)
@@ -130,7 +134,11 @@ class Trainer(object):
                 targets = pack_padded_sequence(captions[:,1:], lengths, batch_first=True)[0]
                 # Forward, Backward and Optimize
                 self.model.zero_grad()
+<<<<<<< HEAD
                 outputs = self.model(images, captions[:,:-1], lengths)
+=======
+                outputs = self.model(images, captions, lengths)
+>>>>>>> 6574f0497ef19d015f8acfdffb4f1f166ed54cfa
                 loss = self.criterion(outputs, targets)
                 loss.backward()
                 clip_gradient(self.optimizer, self.opt.grad_clip)

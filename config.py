@@ -53,7 +53,11 @@ def parse_opt():
                         help='Maximum scheduled sampling prob.')
 
     parser.add_argument('--log_step', type=int, default=10, help='step size for prining log info')
+<<<<<<< HEAD
     parser.add_argument('--save_checkpoint_every', type=int, default=3236,
+=======
+    parser.add_argument('--save_checkpoint_every', type=int, default=1000,
+>>>>>>> 6574f0497ef19d015f8acfdffb4f1f166ed54cfa
                         help='how often to save a model checkpoint (in iterations)?')
     parser.add_argument('--language_eval', type=int, default=1, help='1 for Cider score, 0 for log loss')
     args = parser.parse_args()

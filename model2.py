@@ -31,7 +31,10 @@ class ShowAttendTellModel(nn.Module):
         """ define classifier """
         self.context2out= nn.Linear(context_size, embed_size)
         self.hidden2tout= nn.Linear(hidden_size, embed_size)
+<<<<<<< HEAD
         self.dropout = nn.Dropout(p=0.5)
+=======
+>>>>>>> 6574f0497ef19d015f8acfdffb4f1f166ed54cfa
         self.classifier = nn.Linear(embed_size, vocab_size)
 
     def forward(self, images, captions, lengths):
@@ -79,7 +82,10 @@ class ShowAttendTellModel(nn.Module):
     def output_layer(self, context, hidden, prev=None):
         context = self.context2out(context)
         hidden = self.hidden2tout(hidden)
+<<<<<<< HEAD
         # inputs = F.tanh(context + hidden)
+=======
+>>>>>>> 6574f0497ef19d015f8acfdffb4f1f166ed54cfa
         out = self.classifier(context + hidden)
 
         return out
@@ -90,7 +96,11 @@ class ShowAttendTellModel(nn.Module):
 
     def sample(self, images, states):
         """"""
+<<<<<<< HEAD
         embeddings = self.embedding(Variable(torch.ones(images.size(0))).long().cuda())
+=======
+        embeddings = self.embedding(Variable(torch.zeros(images.size(0))).long().cuda())
+>>>>>>> 6574f0497ef19d015f8acfdffb4f1f166ed54cfa
         """Samples captions for given image features (Greedy search)."""
         sampled_ids = []
         features = self.encoder(images)  # [batch, 512, 14, 14]
