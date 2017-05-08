@@ -33,8 +33,11 @@ def language_eval(preds):
     # filter results to only those in MSCOCO validation set (will be about a third)
     preds_filt = [p for p in preds if p['image_id'] in valids]
     print('using %d/%d predictions' % (len(preds_filt), len(preds)))
+
     with open('cache/'+tmp_name+'.json', 'w') as f:
         json.dump(preds_filt, f)
+
+    json.dump(preds_filt, open('cache/'+tmp_name+'.json', 'w'))
 
     resFile = 'cache/'+tmp_name+'.json'
     cocoRes = coco.loadRes(resFile)
@@ -53,6 +56,8 @@ def language_eval(preds):
     return out
 
 def evaluation(model, crit, loader, vocab, opt):
+
+
     verbose = True
     val_images_use = -1
     lang_eval = 1
@@ -62,7 +67,9 @@ def evaluation(model, crit, loader, vocab, opt):
     loss_sum = 0
     loss_evals = 0
     predictions = []
+
     check_duplicate = []
+
 
     for iter, (images, captions, lengths, imgids) in enumerate(loader):
         torch.cuda.synchronize()
@@ -71,8 +78,10 @@ def evaluation(model, crit, loader, vocab, opt):
         # Set mini-batch dataset
         images = Variable(images, volatile=True)
         captions = Variable(captions, volatile=True)
+
         state = (Variable(torch.zeros(images.size(0), opt.hidden_size), volatile=True),
                  Variable(torch.zeros(images.size(0), opt.hidden_size), volatile=True))
+
 
         if opt.num_gpu > 0:
             images = images.cuda()
@@ -88,6 +97,7 @@ def evaluation(model, crit, loader, vocab, opt):
         loss_evals = loss_evals + 1
 
         sampled_ids = model.sample(images, state)
+
         sampled_ids = sampled_ids.cpu().data.numpy()
         result_sentences = []
         for sentence_ids in sampled_ids:

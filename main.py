@@ -49,8 +49,10 @@ def main(opt):
 
 if __name__ == "__main__":
     args = parse_opt()
+
     setup_logging(os.path.join('log.txt'))
     logging.info("\nrun arguments: %s", json.dumps(vars(args), indent=4, sort_keys=True))
+
 
     main(args)
     print('done')

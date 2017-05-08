@@ -1,4 +1,5 @@
 data/
-.idea/*
+.idea/
 experiment/
 pycocoevalcap/
+

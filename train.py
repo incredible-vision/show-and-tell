@@ -36,6 +36,7 @@ class Trainer(object):
 
         self.model = ShowAttendTellModel(opt.hidden_size, opt.embed_size, len(self.vocab), opt.embed_size, opt)
 
+
         if self.num_gpu == 1:
             self.model.cuda()
 
@@ -62,15 +63,12 @@ class Trainer(object):
     def load_optimizer(self):
         """"""
 
-
     def train(self):
 
         infos = {}
-<<<<<<< HEAD
+
         if self.opt.start_from is not None and not self.opt.load_pretrained:
-=======
-        if self.opt.start_from is not None:
->>>>>>> 6574f0497ef19d015f8acfdffb4f1f166ed54cfa
+
             # open old infos and check if models are compatible
             with open(os.path.join(self.opt.expr_dir, 'infos' + '.pkl')) as f:
                 infos = pickle.load(f)
@@ -85,6 +83,7 @@ class Trainer(object):
         # loading a best validation score
         if self.opt.load_best_score == True:
             best_val_score = infos.get('best_val_score', None)
+
 
         def clip_gradient(optimizer, grad_clip):
             for group in optimizer.param_groups:
@@ -120,6 +119,7 @@ class Trainer(object):
                 if iter <= loaded_iteration:
                     continue
 
+
                 torch.cuda.synchronize()
                 start = time.time()
 
@@ -130,15 +130,16 @@ class Trainer(object):
                 if self.num_gpu > 0:
                     images = images.cuda()
                     captions = captions.cuda()
+
                 lengths = [l-1 for l in lengths]
                 targets = pack_padded_sequence(captions[:,1:], lengths, batch_first=True)[0]
                 # Forward, Backward and Optimize
                 self.model.zero_grad()
-<<<<<<< HEAD
+
                 outputs = self.model(images, captions[:,:-1], lengths)
-=======
-                outputs = self.model(images, captions, lengths)
->>>>>>> 6574f0497ef19d015f8acfdffb4f1f166ed54cfa
+
+
+
                 loss = self.criterion(outputs, targets)
                 loss.backward()
                 clip_gradient(self.optimizer, self.opt.grad_clip)
@@ -196,7 +197,6 @@ class Trainer(object):
 
 
 
-
 if __name__ == '__main__':
 
 
@@ -224,4 +224,6 @@ if __name__ == '__main__':
     parser.add_argument('--learning_rate', type=float, default=0.001)
     args = parser.parse_args()
     print(json.dumps(vars(args), indent=2))
+
     # main(args)
+

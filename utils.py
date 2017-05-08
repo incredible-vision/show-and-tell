@@ -5,6 +5,7 @@ import logging
 import numpy as np
 from datetime import datetime
 
+
 def setup_logging(log_file='log.txt'):
 
     logging.basicConfig(level=logging.DEBUG,
@@ -17,6 +18,7 @@ def setup_logging(log_file='log.txt'):
     formatter = logging.Formatter('%(message)s')
     console.setFormatter(formatter)
     logging.getLogger('').addHandler(console)
+
 
 class Vocabulary(object):
     def __init__(self):
