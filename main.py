@@ -7,8 +7,17 @@ from data_loader import get_loader
 from utils import Vocabulary
 from config import parse_opt, save_config
 from train import Trainer
+from utils import setup_logging
+import logging
 
 def main(opt):
+
+    if not os.path.exists(os.path.join('experiment', opt.user_id)):
+        os.makedirs(os.path.join('experiment', opt.user_id))
+
+    opt.expr_dir = os.path.join('experiment', opt.user_id, opt.exp_id)
+    if not os.path.exists(opt.expr_dir):
+        os.makedirs(opt.expr_dir)
 
     torch.manual_seed(opt.random_seed)
     if opt.num_gpu > 0:
@@ -40,5 +49,8 @@ def main(opt):
 
 if __name__ == "__main__":
     args = parse_opt()
+    setup_logging(os.path.join('log.txt'))
+    logging.info("\nrun arguments: %s", json.dumps(vars(args), indent=4, sort_keys=True))
+
     main(args)
     print('done')
