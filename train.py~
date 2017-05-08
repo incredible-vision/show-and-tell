@@ -14,6 +14,7 @@ import torch.optim as optim
 from torch.nn.utils.rnn import pack_padded_sequence
 from torchvision import transforms
 from eval import evaluation
+import main
 
 
 class Trainer(object):
@@ -137,8 +138,8 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--root_dir', type=str, default='/home/jisu/Desktop/show-and-tell', help="root directory of the project")
-    parser.add_argument('--data_json', type=str, default='./data/data.json', help='input data list which includes captions and image information')
+    parser.add_argument('--root_dir', type=str, default='/home/jisu/Desktop/Data/COCO', help="root directory of the project")
+    parser.add_argument('--data_json', type=str, default='/home/jisu/Desktop/Data/COCO/annotations_captions', help='input data list which includes captions and image information')
     parser.add_argument('--crop_size', type=int, default=224, help='image crop size')
 
     parser.add_argument('--model_path', type=str, default='models/', help='path for saving trained models')
@@ -159,4 +160,4 @@ if __name__ == '__main__':
     parser.add_argument('--learning_rate', type=float, default=0.001)
     args = parser.parse_args()
     print(json.dumps(vars(args), indent=2))
-    # main(args)
+    main(args)

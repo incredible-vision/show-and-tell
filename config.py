@@ -8,13 +8,13 @@ def parse_opt():
     parser = argparse.ArgumentParser()
 
     # Data input settings
-    parser.add_argument('--root_dir', type=str, default='/home/myunggi/Research/show-and-tell', help="root directory")
+    parser.add_argument('--root_dir', type=str, default='/home/jisu/Desktop/show-and-tell', help="root directory")
     parser.add_argument('--data_json', type=str, default='data/data.json', help='input data list which includes captions and image information')
 
     parser.add_argument('--num_gpu', type=int, default=1, help='number of gpus available, if set to 0, use cpu instead')
     parser.add_argument('--random_seed', type=int, default=123, help='random seed number, to reproduce the result, fix the number')
     parser.add_argument('--crop_size', type=int, default=224, help='image crop size, spatial dimension of input to the encoder')
-    parser.add_argument('--batch_size', type=int, default=128, help='batch size for training')
+    parser.add_argument('--batch_size', type=int, default=4, help='batch size for training')
 
     parser.add_argument('--vocab_path', type=str, default='data/vocab.pkl', help='vocabulary wrapper')
 
