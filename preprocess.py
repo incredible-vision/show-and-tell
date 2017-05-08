@@ -120,7 +120,7 @@ def main(opt):
         out_img['file_path'] = img_save_path
 
         # resize the image into (256,256) and save it in the data directory
-        # assert resize_image(img_path, img_save_path, i+1, len(imgs)), 'failed resizing image %s - see http://git.io/vBIE0' % (img['file_path'])
+        assert resize_image(img_path, img_save_path, i+1, len(imgs)), 'failed resizing image %s - see http://git.io/vBIE0' % (img['file_path'])
 
         for i, sentence in enumerate(img['sentences']):
             out_img['final_caption'] = sentence['tokens']

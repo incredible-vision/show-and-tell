@@ -9,7 +9,7 @@ import json
 from data_loader import get_loader
 from utils import Vocabulary
 from models import EncoderCNN, DecoderRNN
-from model2 import ShowAttendTellModel
+from model import ShowAttendTellModel
 from torch.autograd import Variable
 import torch.optim as optim
 from torch.nn.utils.rnn import pack_padded_sequence

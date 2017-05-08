@@ -34,6 +34,9 @@ def language_eval(preds):
     preds_filt = [p for p in preds if p['image_id'] in valids]
     print('using %d/%d predictions' % (len(preds_filt), len(preds)))
 
+    if not os.path.exists('cache'):
+        os.makedirs('cache')
+
     with open('cache/'+tmp_name+'.json', 'w') as f:
         json.dump(preds_filt, f)
 
@@ -56,11 +59,6 @@ def language_eval(preds):
     return out
 
 def evaluation(model, crit, loader, vocab, opt):
-
-
-    verbose = True
-    val_images_use = -1
-    lang_eval = 1
 
     model.eval()
 

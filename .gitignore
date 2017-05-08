@@ -1,5 +1,5 @@
-data/
+data/*
 .idea/
-experiment/
+experiment/*
 pycocoevalcap/
 *.pyc

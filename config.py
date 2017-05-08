@@ -35,7 +35,7 @@ def parse_opt():
 
     parser.add_argument('--load_pretrained', action='store_false', default=False)
 
-    parser.add_argument('--learning_rate', type=float, default=0.001)
+    parser.add_argument('--learning_rate', type=float, default=0.01)
     parser.add_argument('--max_epochs', type=int, default=20)
 
     parser.add_argument('--learning_rate_decay_start', type=int, default=1,
