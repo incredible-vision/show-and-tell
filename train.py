@@ -8,7 +8,7 @@ import pickle
 import json
 from data_loader import get_loader
 from utils import Vocabulary
-from models import EncoderCNN, DecoderRNN
+from models import EncoderCNN, DecoderRNN, DecoderPolicyGradient
 from torch.autograd import Variable
 import torch.optim as optim
 from torch.nn.utils.rnn import pack_padded_sequence
@@ -34,8 +34,8 @@ class Trainer(object):
             self.vocab = pickle.load(f)
 
         self.encoder = EncoderCNN(opt.embed_size)
-        self.decoder = DecoderRNN(opt.embed_size, opt.hidden_size,
-                                  len(self.vocab), opt.num_layers)
+        self.decoder = DecoderRNN(opt.embed_size, opt.hidden_size, len(self.vocab), opt.num_layers)
+        self.decoderPolicyGradient = DecoderPolicyGradient(opt.embed_size, opt.hidden_size, len(self.vocab), opt.num_layers)
 
         if self.num_gpu == 1:
             self.encoder.cuda()
@@ -89,33 +89,74 @@ class Trainer(object):
                 self.opt.ss_prob = min(self.opt.scheduled_sampling_increase_prob * fraction, self.opt.scheduled_sampling_max_prob)
                 self.decoder.ss_prob = self.opt.ss_prob
 
+            # Train models
             for iter, (images, captions, lengths, imgids) in enumerate(self.trainloader):
+                # Set Timer
+                self.encoder.train()
+                self.decoder.train()
 
                 torch.cuda.synchronize()
                 start = time.time()
 
                 # Set mini-batch dataset
-                images = Variable(images)
+                images   = Variable(images)
                 captions = Variable(captions)
 
                 if self.num_gpu > 0:
-                    images = images.cuda()
+                    images   = images.cuda()
                     captions = captions.cuda()
 
+                # Pack-Padded Sequence
                 targets = pack_padded_sequence(captions, lengths, batch_first=True)[0]
+
                 # Forward, Backward and Optimize
                 self.decoder.zero_grad()
                 self.encoder.zero_grad()
-                features = self.encoder(images)
-                outputs = self.decoder(features, captions, lengths)
-                loss = self.criterion(outputs, targets)
-                loss.backward()
-                clip_gradient(self.optimizer, self.opt.grad_clip)
-                self.optimizer.step()
 
+                # Show and Tell
+                if 1:
+                    # Extract Image Features
+                    #  - Input:  images[128x3x224x224]
+                    #  - Output: features[128x256]
+                    features = self.encoder(images)
+                    # Get Scores for each class
+                    #  - Input: features[128x256], captions[128x25](Ground Truth), lengths[128](lengths of each sentence)
+                    #  - output: output[1635x10372] (np.sum(lengths) = 1635, len(self.vocab) = 10372)
+                    outputs  = self.decoder(features, captions, lengths)
+                    # Calculate loss
+                    loss     = self.criterion(outputs, targets)
+                    loss.backward()
+                    clip_gradient(self.optimizer, self.opt.grad_clip)
+                    self.optimizer.step()
+
+                # Improved Image Captioning via Policy Gradient Optimization of SPIDEr (REINFORCE)
+                if 0:
+                    # Extract Image Features
+                    #  - Input:  images[128x3x224x224]
+                    #  - Output: features[128x256]
+                    features = self.encoder(images)
+
+                    # Get Actions and Rewards
+                    #  - Input:  features[128x256], length[128](lengths of each sentence)
+                    #  - Output: actions[128x<length>], rewards[128x<length>]
+                    actions, rewards = self.decoderPolicyGradient(features, lengths)
+
+                    # from REINFORCE from examples -----------------------------------------------
+                    rewards = (rewards - rewards.mean()) / (rewards.std() + np.finfo(np.float32).eps)  # Baseline
+                    for action, r in zip(model.saved_actions, rewards):
+                        action.reinforce(r)
+                    optimizer.zero_grad()
+                    autograd.backward(model.saved_actions[0], [None for _ in model.saved_actions[0]])
+                    self.optimizer.step()
+                    del model.rewards[:]
+                    del model.saved_actions[:]
+                    # ----------------------------------------------------------------------------
+
+                # Get Timer
                 torch.cuda.synchronize()
                 end = time.time()
 
+                # Display Information
                 if iter % self.opt.log_step == 0:
                     print('Epoch [%d/%d], Step [%d/%d], Loss: %.4f, Perplexity: %5.4f'
                           % (epoch, self.opt.max_epochs, iter, self.total_train_iter,
@@ -128,8 +169,9 @@ class Trainer(object):
                 #     self.ss_prob_history[iter] = self.decoder.ss_prob
 
                 # make evaluation on validation set, and save model
-                if (iter % self.opt.save_checkpoint_every == 0):
-                    val_loss, predictions, lang_stats = evaluation(self.encoder, self.decoder, self.criterion, self.validloader, self.vocab, self.opt)
+                if 1:
+                    if (iter+1 % self.opt.save_checkpoint_every == 0):
+                        val_loss, predictions, lang_stats = evaluation(self.encoder, self.decoder, self.criterion, self.validloader, self.vocab, self.opt)
 
 
 if __name__ == '__main__':
@@ -137,7 +179,8 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--root_dir', type=str, default='/home/myunggi/Research/show-and-tell', help="root directory of the project")
+    # parser.add_argument('--root_dir', type=str, default='/home/myunggi/Research/show-and-tell', help="root directory of the project")
+    parser.add_argument('--root_dir', type=str, default='/home/dehlix/Projects/Captioning/show-and-tell', help="root directory of the project")
     parser.add_argument('--data_json', type=str, default='data/data.json', help='input data list which includes captions and image information')
     parser.add_argument('--crop_size', type=int, default=224, help='image crop size')
 

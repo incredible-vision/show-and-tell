@@ -3,7 +3,8 @@ from __future__ import division
 from __future__ import print_function
 
 import numpy as np
-import json
+# import json
+import simplejson as json
 from json import encoder
 import random
 import string
@@ -18,7 +19,8 @@ def language_eval(preds):
     import sys
     sys.path.append("coco-caption")
     # annFile = '/home/myunggi/Repository/Data/COCO/annotations_captions/captions_val2014.json'
-    annFile = 'data/MSCOCO/annotations/captions_val2014.json'
+    annFile = 'data/MSCOCO/annotations/captions_train2014.json'
+    # annFile = 'data/data.json'
 
     from pycocotools.coco import COCO
     from pycocoevalcap.eval import COCOEvalCap
@@ -33,10 +35,11 @@ def language_eval(preds):
 
     # filter results to only those in MSCOCO validation set (will be about a third)
     preds_filt = [p for p in preds if p['image_id'] in valids]
-    print('using %d/%d predictions' % (len(preds_filt), len(preds)))
+    # print('using %d/%d predictions' % (len(preds_filt), len(preds)))
     json.dump(preds_filt, open('cache/'+tmp_name+'.json', 'w'))
 
     resFile = 'cache/'+tmp_name+'.json'
+    # print(resFile)
     cocoRes = coco.loadRes(resFile)
     cocoEval = COCOEvalCap(coco, cocoRes)
     cocoEval.params['image_id'] = cocoRes.getImgIds()

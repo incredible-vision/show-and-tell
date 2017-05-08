@@ -40,7 +40,8 @@ class CocoDataset(data.Dataset):
 
         target = torch.IntTensor(caption)
 
-        return img, target, data[index]['imgid']
+        # return img, target, data[index]['imgid']
+        return img, target, data[index]['cocoid']
 
     def __len__(self):
         return len(self.data)
@@ -80,7 +81,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--root_dir', type=str, default='/home/myunggi/Research/show-and-tell', help="root directory of the project")
+    # parser.add_argument('--root_dir', type=str, default='/home/myunggi/Research/show-and-tell', help="root directory of the project")
+    parser.add_argument('--root_dir', type=str, default='/home/dehlix/Projects/Captioning/show-and-tell', help="root directory of the project")
+
     parser.add_argument('--data_json', type=str, default='data/data.json', help='input data list which includes captions and image information')
     parser.add_argument('--vocab_path', type=str, default='data/vocab.pkl', help='vocabulary wrapper')
     parser.add_argument('--crop_size', type=int, default=224, help='image crop size')

@@ -1,0 +1,44 @@
+import os
+import json
+import pickle
+import torch
+from torchvision import transforms
+from data_loader import get_loader
+from utils import Vocabulary
+from config import parse_opt, save_config
+from train_SPIDEr import Trainer
+
+def main(opt):
+
+    torch.manual_seed(opt.random_seed)
+    if opt.num_gpu > 0:
+        torch.cuda.manual_seed(opt.random_seed)
+
+    train_transform = transforms.Compose([
+        transforms.RandomCrop(args.crop_size),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
+
+    valid_transform = transforms.Compose([
+        transforms.CenterCrop(args.crop_size),
+        # transforms.RandomHorizontalFlip(), # do we need to flip when eval?
+        transforms.ToTensor(),
+        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
+
+    train_dataloader = get_loader(opt, mode='train', transform=train_transform)
+    valid_dataloader = get_loader(opt, mode='val',   transform=valid_transform)
+
+    print('load the dataset into memory...')
+    print('total iterations in training phase : {} \ntotal iterations in validation phase : {}'.format(len(train_dataloader), len(valid_dataloader)))
+
+    trainer = Trainer(opt, train_dataloader, valid_dataloader)
+    trainer.train()
+    print('done')
+
+
+
+if __name__ == "__main__":
+    args = parse_opt()
+    main(args)
+    print('done')
