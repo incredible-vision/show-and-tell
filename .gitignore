@@ -2,4 +2,4 @@ data/
 .idea/
 experiment/
 pycocoevalcap/
-
+*.pyc
