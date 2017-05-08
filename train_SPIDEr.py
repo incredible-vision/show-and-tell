@@ -214,15 +214,8 @@ class Trainer(object):
                     self.decoderPolicyGradient.train()
 
                     # Set Timer
-                    torch.cuda.synchronize()
-                    start = time.time()
-
-                    # Set mini-batch dataset for MC Rollouts (Volatile)
-                    if 0:
-                        images_volatile   = Variable(images,   volatile=True)
-                        captions_volatile = Variable(captions, volatile=True)
-                        states_volatile   = (Variable(torch.zeros(self.opt.num_layers, images.size(0), self.opt.hidden_size), volatile=True),
-                                             Variable(torch.zeros(self.opt.num_layers, images.size(0), self.opt.hidden_size), volatile=True))
+                    # torch.cuda.synchronize()
+                    # start = time.time()
 
                     # Set mini-batch dataset for Policy Gradient
                     images   = Variable(images)
@@ -232,11 +225,6 @@ class Trainer(object):
 
                     # Set GPU
                     if self.num_gpu > 0:
-                        # Set mini-batch dataset for MC Rollouts (Volatile)
-                        if 0:
-                            images_volatile   = images_volatile.cuda()
-                            captions_volatile = captions_volatile.cuda()
-                            states_volatile   = [s.cuda() for s in states_volatile]
                         # Set mini-batch dataset for Policy Gradient
                         images = images.cuda()
                         captions = captions.cuda()
@@ -254,26 +242,18 @@ class Trainer(object):
                     #  - Input:  images[128x3x224x224]
                     #  - Output: features[128x256]
                     features          = self.encoder(images)
-                    if 0:
-                        features_volatile = self.encoder(images_volatile)
 
                     # Generate Sequence g_1:T ~ Policy(.|Image) with Ground Truth (Training)
                     #  - Input:  features[128x256], length[128](lengths of each sentence)
                     #  - Output: outputs[<length>x10372], actions[128x<length>], rewards[128x<length>]
-                    outputs, actions, actions_rollouts = self.decoderPolicyGradient(features, captions, states, lengths, self.opt.MC_rollouts, MCRollouts=True)
+                    _, actions, actions_rollouts = self.decoderPolicyGradient(features, captions, states, lengths, self.opt.MC_rollouts, MCRollouts=True)
 
-                    if 0:
-                        print('Display Sentence (MC Rollouts) -----------------------------------------------')
-                        torch.set_printoptions(edgeitems=100, linewidth=160)
-                        print(actions_rollouts)
-                        self.decoderPolicyGradient.display_sentences(self.vocab, actions_rollouts, imgids)
-                        print('------------------------------------------------------------------------------')
-                        print('')
-
+                    '''
                     # Convert actions_rollouts(word indexes) to sentences
                     predictions = []
                     # sampled_ids = actions_rollouts[:, 1:].cpu().data.numpy()  # Rollouts without <start>
-                    sampled_ids = actions_rollouts.cpu().data.numpy()
+                    # sampled_ids = actions_rollouts.cpu().data.numpy()
+                    sampled_ids = actions_rollouts
                     sampled_ids = sampled_ids[:, 1:]
                     result_sentences = []
                     for sentence_ids in sampled_ids:
@@ -289,52 +269,24 @@ class Trainer(object):
                         entry = {'image_id': imgids[i % len(imgids)], 'caption': sentence}
                         predictions.append(entry)
 
-                    print('------------------------------------------')
-
+                    '''
 
                     if 0:
-                        print('------------------------------------------')
                         torch.set_printoptions(edgeitems=100, linewidth=160)
-                        print('actions')
-                        print(actions)
-                        print('')
-                        print('------------------------------------------')
-                        print('------------------------------------------')
-                        print('actions_rollouts')
-                        print(actions_rollouts)
-                        print('')
-                        print('------------------------------------------')
-                        print('------------------------------------------')
-                        print('predictions')
-                        for entry in predictions:
-                            print(entry)
-                        print('')
-                        print('------------------------------------------')
 
                     # Calculate Rewards - Evaluate COCO Metrics
                     rewards = []
                     rewards_rollouts = []
                     lang_stat_rollouts = []
                     for k in range(self.opt.MC_rollouts*(max(lengths)-1)):
-                        if 1:
+                        if 0:
                             lang_stat = language_eval(predictions[k * len(lengths):(k + 1) * len(lengths)])  # Batch-Based
                             BCMR = + 0.5 * lang_stat['Bleu_1'] + 0.5 * lang_stat['Bleu_2'] \
                                    + 1.0 * lang_stat['Bleu_3'] + 1.0 * lang_stat['Bleu_4'] \
                                    + 1.0 * lang_stat['CIDEr']  + 5.0 * lang_stat['METEOR'] + 2.0 * lang_stat['ROUGE_L']
                             lang_stat_rollouts.append(lang_stat)
-                        # BCMR = 1
+                        BCMR = 1
                         rewards_rollouts.append(BCMR)
-
-                    if 0:
-                        print('-----------------------')
-                        print('actions_rollouts')
-                        print(actions_rollouts)
-                        print('-----------------------')
-                        print('-----------------------')
-                        print('rewards_rollouts')
-                        print(rewards_rollouts)
-                        print('-----------------------')
-                        print('-----------------------')
 
                     for idx in range(len(rewards_rollouts)/self.opt.MC_rollouts):
                         reward = rewards_rollouts[idx*self.opt.MC_rollouts] + \
@@ -347,11 +299,6 @@ class Trainer(object):
                     rewards_min = torch.min(rewards)
                     rewards_avg = torch.mean(rewards)
                     rewards = (rewards - rewards.mean()) / (rewards.std() + np.finfo(np.float32).eps)  # baseline
-                    if 0:
-                        print('-----------------------')
-                        print('rewards')
-                        print(rewards)
-                        print('-----------------------')
 
                     # Training the Network using REINFORCE ---------------------------------------
                     #  - actions: list [torch.longTensor, torch.longTensor, ..., torch.longTensor]
@@ -366,25 +313,22 @@ class Trainer(object):
                     self.optimizer.step()
 
                     # Get Timer
-                    torch.cuda.synchronize()
-                    end = time.time()
+                    # torch.cuda.synchronize()
+                    # end = time.time()
+
+                    del images
+                    del captions
+                    del states
+                    del features
+                    del actions[:]
+                    del actions_rollouts
+                    del rewards
+                    del rewards_rollouts[:]
 
                     # Display Information :: REINFORCE
                     if iter % self.opt.log_step == 0:
-                        print('----------------------------------------------------------------------------------------------------------------')
                         print('[REINFORCE] Epoch [%d/%d], Step [%d/%d], Rewards[min/avg/max]: [%.4f/%.4f/%.4f], Perplexity: [%5.4f/%5.4f/%5.4f]'
                               % (epoch, self.opt.max_epochs, iter, self.total_train_iter, rewards_min, rewards_avg, rewards_max, np.exp(rewards_min), np.exp(rewards_avg), np.exp(rewards_max)))
-                        print('----------------------------------------------------------------------------------------------------------------')
-
-                    del actions[:]
-                    for action in actions_rollouts:
-                        del action[:]
-                    del rewards[:]
-                    for reward in rewards_rollouts:
-                        del reward[:]
-                    del images[:]
-                    del captions[:]
-                    del states[:]
 
                 # Make evaluation on validation set, and save model
                 val_loss, predictions, lang_stats = evaluationPolicyGradient(self.encoder, self.decoderPolicyGradient, self.criterion, self.validloader, self.vocab, self.opt)

@@ -129,7 +129,8 @@ class DecoderPolicyGradient(nn.Module):
                 action = torch.multinomial(distribution, 1, True)  # {Variable} [torch.LongTensor of size 1x1]
                 # Append Results to List Variables
                 actions.append(action)
-                actions_rollouts.append(action.repeat(cols, 1))
+                action_detached = action.detach()
+                actions_rollouts.append(action_detached.repeat(cols, 1))
             # For Every State,
             for t in range(2, max(lengths)):
                 # Get LSTM Network Output
@@ -142,11 +143,11 @@ class DecoderPolicyGradient(nn.Module):
                 action = torch.multinomial(distribution, 1, True)  # {Variable} [torch.LongTensor of size 1x1]
                 # Select Stochastic MC Rollouts & Append Results to List Variable
                 actions.append(action)
-                self.eval()
+                action_detached = action.detach()
+                distribution_rollouts = distribution.detach()
                 actions_rollouts.append(
-                    torch.cat((torch.multinomial(distribution.repeat(K*(t-1), 1), 1, True),
-                               action.repeat(cols-K*(t-1), 1)), 0))
-                self.train()
+                    torch.cat((torch.multinomial(distribution_rollouts.repeat(K*(t-1), 1), 1, True),
+                               action_detached.repeat(cols-K*(t-1), 1)), 0))
 
             # Modify Types of Variables
             actions_rollouts = torch.stack(actions_rollouts, 1).squeeze()
@@ -172,9 +173,11 @@ class DecoderPolicyGradient(nn.Module):
                 inputs = self.embed(captions[:, idx]).unsqueeze(1)  # Ground Truth
                 outputs.append(output)
             # Modify Types of Variables
-            outputs = torch.cat(outputs, 1).view(len(lengths), max(lengths), -1)
+            # outputs = torch.cat(outputs, 1).view(len(lengths), max(lengths), -1)
             # Modify Types of Variables into Pack-padded Sequence
-            outputs = pack_padded_sequence(outputs, lengths, batch_first=True)[0]
+            # outputs = pack_padded_sequence(outputs, lengths, batch_first=True)[0]
+
+        actions_rollouts = actions_rollouts.data.cpu().numpy()
 
         return outputs, actions, actions_rollouts
 

@@ -15,7 +15,7 @@ def parse_opt():
     parser.add_argument('--num_gpu',        type=int, default=1,                help='number of gpus available, if set to 0, use cpu instead')
     parser.add_argument('--random_seed',    type=int, default=123,              help='random seed number, to reproduce the result, fix the number')
     parser.add_argument('--crop_size',      type=int, default=224,              help='image crop size, spatial dimension of input to the encoder')
-    parser.add_argument('--batch_size',     type=int, default=128,              help='batch size for training')
+    parser.add_argument('--batch_size',     type=int, default=64,              help='batch size for training')
     # parser.add_argument('--batch_size',     type=int, default=512,              help='batch size for training')
     # parser.add_argument('--batch_size',     type=int, default=2,              help='batch size for training')
     parser.add_argument('--sentence_size',  type=int, default=20,               help='maximum sentence size')
