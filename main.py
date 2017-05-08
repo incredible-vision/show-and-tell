@@ -7,6 +7,7 @@ from data_loader import get_loader
 from utils import Vocabulary
 from config import parse_opt, save_config
 from train import Trainer
+<<<<<<< HEAD
 from utils import setup_logging
 import logging
 
@@ -19,6 +20,11 @@ def main(opt):
     if not os.path.exists(opt.expr_dir):
         os.makedirs(opt.expr_dir)
 
+=======
+
+def main(opt):
+
+>>>>>>> cc0e98fb3cfd9f140046ad3d6679f59d919a4f65
     torch.manual_seed(opt.random_seed)
     if opt.num_gpu > 0:
         torch.cuda.manual_seed(opt.random_seed)
@@ -49,8 +55,11 @@ def main(opt):
 
 if __name__ == "__main__":
     args = parse_opt()
+<<<<<<< HEAD
     setup_logging(os.path.join('log.txt'))
     logging.info("\nrun arguments: %s", json.dumps(vars(args), indent=4, sort_keys=True))
 
+=======
+>>>>>>> cc0e98fb3cfd9f140046ad3d6679f59d919a4f65
     main(args)
     print('done')

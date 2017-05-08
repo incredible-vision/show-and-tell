@@ -5,6 +5,7 @@ import logging
 import numpy as np
 from datetime import datetime
 
+<<<<<<< HEAD
 def setup_logging(log_file='log.txt'):
 
     logging.basicConfig(level=logging.DEBUG,
@@ -18,6 +19,8 @@ def setup_logging(log_file='log.txt'):
     console.setFormatter(formatter)
     logging.getLogger('').addHandler(console)
 
+=======
+>>>>>>> cc0e98fb3cfd9f140046ad3d6679f59d919a4f65
 class Vocabulary(object):
     def __init__(self):
         self.word2idx = {}

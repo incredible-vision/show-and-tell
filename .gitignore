@@ -1,4 +1,8 @@
 data/
+<<<<<<< HEAD
 .idea/
 experiment/
 pycocoevalcap/
+=======
+.idea/
+>>>>>>> cc0e98fb3cfd9f140046ad3d6679f59d919a4f65
