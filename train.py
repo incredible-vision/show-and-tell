@@ -59,9 +59,11 @@ class Trainer(object):
 
     def load_model(self):
         """"""
+        return self.model.load_state_dict(torch.load(os.path.join(self.opt.expr_dir, 'model.pth')))
 
     def load_optimizer(self):
         """"""
+        return self.optimizer.load_state_dict(torch.load(os.path.join(self.opt.expr_dir, 'optimizer.pth')))
 
     def train(self):
 
@@ -105,12 +107,6 @@ class Trainer(object):
                 set_lr(self.optimizer, self.opt.current_lr)
             else:
                 self.opt.current_lr = self.opt.learning_rate
-
-            # # Assign the scheduled sampling prob
-            # if epoch > self.opt.scheduled_sampling_start and self.opt.scheduled_sampling_start >= 0:
-            #     fraction = (epoch - self.opt.scheduled_sampling_start) // self.opt.scheduled_sampling_increase_every
-            #     self.opt.ss_prob = min(self.opt.scheduled_sampling_increase_prob * fraction, self.opt.scheduled_sampling_max_prob)
-            #     self.decoder.ss_prob = self.opt.ss_prob
 
             for iter, (images, captions, lengths, imgids) in enumerate(self.trainloader):
 
@@ -175,6 +171,12 @@ class Trainer(object):
                     if best_val_score is None or current_score > best_val_score:
                         best_val_score = current_score
                         best_flag = True
+
+                    checkpoint_path = os.path.join(self.opt.expr_dir, 'model.pth')
+                    torch.save(self.model.state_dict(), checkpoint_path)
+                    print("model saved to {}".format(checkpoint_path))
+                    optimizer_path = os.path.join(self.opt.expr_dir, 'optimizer.pth')
+                    torch.save(self.optimizer.state_dict(), optimizer_path)
 
                     # Dump miscalleous informations
                     infos['total_iter'] = total_iteration

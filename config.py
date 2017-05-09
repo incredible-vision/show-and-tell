@@ -32,18 +32,14 @@ def parse_opt():
     parser.add_argument('--load_best_score', action="store_true", default=True)
     parser.add_argument('--load_model_path', type=str, default=None)
     parser.add_argument('--load_optim_path', type=str, default=None)
-
     parser.add_argument('--load_pretrained', action='store_false', default=False)
 
     parser.add_argument('--learning_rate', type=float, default=0.01)
     parser.add_argument('--max_epochs', type=int, default=20)
 
-    parser.add_argument('--learning_rate_decay_start', type=int, default=1,
-                        help='at what iteration to start decaying learning rate? (-1 = dont) (in epoch)')
-    parser.add_argument('--learning_rate_decay_every', type=int, default=3,
-                        help='every how many iterations thereafter to drop LR?(in epoch)')
-    parser.add_argument('--learning_rate_decay_rate', type=float, default=0.8,
-                        help='every how many iterations thereafter to drop LR?(in epoch)')
+    parser.add_argument('--learning_rate_decay_start', type=int, default=1, help='at what iteration to start decaying learning rate? (-1 = dont) (in epoch)')
+    parser.add_argument('--learning_rate_decay_every', type=int, default=3, help='every how many iterations thereafter to drop LR?(in epoch)')
+    parser.add_argument('--learning_rate_decay_rate', type=float, default=0.8, help='every how many iterations thereafter to drop LR?(in epoch)')
     parser.add_argument('--grad_clip', type=float, default=0.1,  # 5.,
                         help='clip gradients at this value')
 
@@ -61,7 +57,7 @@ def parse_opt():
 
     parser.add_argument('--language_eval', type=int, default=1, help='1 for Cider score, 0 for log loss')
 
-    parser.add_argument('--save_checkpoint_every', type=int, default=1,
+    parser.add_argument('--save_checkpoint_every', type=int, default=3236,
                         help='how often to save a model checkpoint (in iterations)?')
 
     args = parser.parse_args()

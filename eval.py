@@ -67,6 +67,7 @@ def evaluation(model, crit, loader, vocab, opt):
     predictions = []
 
     check_duplicate = []
+    caption_vis = True
 
 
     for iter, (images, captions, lengths, imgids) in enumerate(loader):
@@ -114,6 +115,10 @@ def evaluation(model, crit, loader, vocab, opt):
                 check_duplicate.append(imgids[i])
             entry = {'image_id': imgids[i], 'caption': sentence}
             predictions.append(entry)
+
+    if caption_vis:
+        for ent in predictions[:10]:
+            print("%s : %s" % (ent['image_id'], ent['caption']))
 
     lang_stats = language_eval(predictions)
 
