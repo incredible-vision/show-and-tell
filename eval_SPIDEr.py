@@ -14,30 +14,22 @@ import sys
 import torch
 from torch.autograd import Variable
 from torch.nn.utils.rnn import pack_padded_sequence
+from pycocotools.coco import COCO
+from pycocoevalcap.eval import COCOEvalCap
 
-def language_eval(preds):
-    import sys
-    sys.path.append("coco-caption")
-    # annFile = '/home/myunggi/Repository/Data/COCO/annotations_captions/captions_val2014.json'
-    annFile = 'data/MSCOCO/annotations/captions_train2014.json'
-    # annFile = 'data/data.json'
 
-    from pycocotools.coco import COCO
-    from pycocoevalcap.eval import COCOEvalCap
+
+
+def language_eval(preds, coco, valids):
 
     encoder.FLOAT_REPR = lambda o: format(o, '.3f')
-
     random.seed(time.time())
     tmp_name = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(6))
-
-    coco = COCO(annFile)
-    valids = coco.getImgIds()
 
     # filter results to only those in MSCOCO validation set (will be about a third)
     preds_filt = [p for p in preds if p['image_id'] in valids]
     # print('using %d/%d predictions' % (len(preds_filt), len(preds)))
     json.dump(preds_filt, open('cache/'+tmp_name+'.json', 'w'))
-
     resFile = 'cache/'+tmp_name+'.json'
     # print(resFile)
     cocoRes = coco.loadRes(resFile)
@@ -55,7 +47,7 @@ def language_eval(preds):
 
     return out
 
-def evaluation(encoder, decoder, crit, loader, vocab, opt):
+def evaluation(encoder, decoder, crit, loader, vocab, opt, coco, valids):
     verbose = True
     val_images_use = -1
     lang_eval = 1
@@ -117,7 +109,7 @@ def evaluation(encoder, decoder, crit, loader, vocab, opt):
     return loss_sum/loss_evals, predictions, lang_stats
 
 
-def evaluationPolicyGradient(encoder, decoderPolicyGradient, crit, loader, vocab, opt):
+def evaluationPolicyGradient(encoder, decoderPolicyGradient, crit, loader, vocab, opt, coco, valids):
     verbose = True
     val_images_use = -1
     lang_eval = 1
@@ -175,5 +167,5 @@ def evaluationPolicyGradient(encoder, decoderPolicyGradient, crit, loader, vocab
             entry = {'image_id': imgids[i], 'caption': sentence}
             predictions.append(entry)
 
-    lang_stats = language_eval(predictions)
+    lang_stats = language_eval(predictions, coco, valids)
     return loss_sum / loss_evals, predictions, lang_stats

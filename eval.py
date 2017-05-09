@@ -13,23 +13,14 @@ import sys
 import torch
 from torch.autograd import Variable
 from torch.nn.utils.rnn import pack_padded_sequence
+from pycocotools.coco import COCO
+from pycocoevalcap.eval import COCOEvalCap
 
-def language_eval(preds):
-    import sys
-    sys.path.append("coco-caption")
-    # annFile = '/home/myunggi/Repository/Data/COCO/annotations_captions/captions_val2014.json'
-    annFile = 'data/MSCOCO/annotations/captions_val2014.json'
-
-    from pycocotools.coco import COCO
-    from pycocoevalcap.eval import COCOEvalCap
+def language_eval(preds, coco, valids):
 
     encoder.FLOAT_REPR = lambda o: format(o, '.3f')
-
     random.seed(time.time())
     tmp_name = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(6))
-
-    coco = COCO(annFile)
-    valids = coco.getImgIds()
 
     # filter results to only those in MSCOCO validation set (will be about a third)
     preds_filt = [p for p in preds if p['image_id'] in valids]
@@ -51,6 +42,7 @@ def language_eval(preds):
         out[metric] = score
 
     return out
+
 
 def evaluation(encoder, decoder, crit, loader, vocab, opt):
     verbose = True
@@ -114,45 +106,48 @@ def evaluation(encoder, decoder, crit, loader, vocab, opt):
     return loss_sum/loss_evals, predictions, lang_stats
 
 
-def evaluationPolicyGradient(encoder, decoderPolicyGradient, crit, loader, vocab, opt):
-    verbose = True
-    val_images_use = -1
-    lang_eval = 1
+def evaluationPolicyGradient(encoder, decoderPolicyGradient, crit, loader, vocab, opt, coco, valids):
 
+    # Set Network Model as Evaluation Mode
     encoder.eval()
     decoderPolicyGradient.eval()
 
+    # Initialize Variables
     loss_sum = 0
     loss_evals = 0
     predictions = []
     check_duplicate = []
 
     for iter, (images, captions, lengths, imgids) in enumerate(loader):
-        torch.cuda.synchronize()
-        start = time.time()
 
         # Set mini-batch dataset
-        images = Variable(images, volatile=True)
-        captions = Variable(captions, volatile=True)
-        state = (Variable(torch.zeros(opt.num_layers, images.size(0), opt.hidden_size), volatile=True),
-                 Variable(torch.zeros(opt.num_layers, images.size(0), opt.hidden_size), volatile=True))
+        images   =  Variable(images,   volatile=True)
+        captions =  Variable(captions, volatile=True)
+        states    = (Variable(torch.zeros(opt.num_layers, images.size(0), opt.hidden_size), volatile=True),
+                    Variable(torch.zeros(opt.num_layers, images.size(0), opt.hidden_size), volatile=True))
 
-        # Set CUDA
+        # Set Variables to Support CUDA Computations
         if opt.num_gpu > 0:
             images = images.cuda()
             captions = captions.cuda()
-            state = [s.cuda() for s in state]
+            states = [s.cuda() for s in states]
 
-        # Evaluate the Loss
+        # Pack-Padded Sequence for Ground Truth Sentence
         targets = pack_padded_sequence(captions, lengths, batch_first=True)[0]
+
+        # Extract Image Features
         features = encoder(images)
-        outputs = decoderPolicyGradient(features, captions, lengths)  # Network output
+
+        # Get Generated Sequence (Scores)
+        outputs = decoderPolicyGradient(features, captions, states, lengths)
+
+        # Calculate Loss using MLE : Calculate loss and Optimize the Network
         loss = crit(outputs, targets)
         loss_sum = loss_sum + loss
-        loss_evals = loss_evals + 1
+        loss_evals += 1
 
-        #
-        sampled_ids = decoderPolicyGradient.sample(features, state)
+        # Convert to Sentences
+        sampled_ids = decoderPolicyGradient.sample(features, states)
         sampled_ids = sampled_ids.cpu().data.numpy()
         result_sentences = []
         for sentence_ids in sampled_ids:
@@ -172,5 +167,11 @@ def evaluationPolicyGradient(encoder, decoderPolicyGradient, crit, loader, vocab
             entry = {'image_id': imgids[i], 'caption': sentence}
             predictions.append(entry)
 
-    lang_stats = language_eval(predictions)
+        # Delete Variables
+        del decoderPolicyGradient.outputs[:]
+        del decoderPolicyGradient.actions[:]
+
+    # Evaluation Generated Sentences
+    lang_stats = language_eval(predictions, coco, valids)
+
     return loss_sum / loss_evals, predictions, lang_stats

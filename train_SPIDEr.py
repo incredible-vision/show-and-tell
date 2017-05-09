@@ -16,7 +16,8 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torchvision import transforms
 from eval import evaluation, evaluationPolicyGradient
 from eval_SPIDEr import language_eval
-
+from pycocotools.coco import COCO
+from pycocoevalcap.eval import COCOEvalCap
 
 # Improved Image Captioning via Policy Gradient Optimization of SPIDEr (REINFORCE)
 class Trainer(object):
@@ -65,6 +66,15 @@ class Trainer(object):
         # self.optimizer = optim.Adam(list(self.encoder.resnet.fc.parameters())+list(self.decoder.parameters()), lr=opt.learning_rate)
         self.optimizer = optim.Adam(list(self.encoder.resnet.fc.parameters()) + list(self.decoderPolicyGradient.parameters()), lr=opt.learning_rate)
 
+        import sys
+        sys.path.append("coco-caption")
+        # annFile = '/home/myunggi/Repository/Data/COCO/annotations_captions/captions_val2014.json'
+        self.annFile = 'data/MSCOCO/annotations/captions_train2014.json'
+        self.coco = COCO(self.annFile)
+        self.valids = self.coco.getImgIds()
+        # When Validation, Refresh coco and valids variables.
+
+
     def load_model(self):
         """"""
 
@@ -82,6 +92,8 @@ class Trainer(object):
             for group in optimizer.param_groups:
                 group['lr'] = lr
 
+
+
         # First, Pre-Train the Model using Maximum Likelihood Estimation on Dataset.
         if 1:
             # Load the Pre-Trained Models
@@ -95,7 +107,8 @@ class Trainer(object):
             print('--------------------------------------------------------------------------')
             print('First, Pre-Train the Model using Maximum Likelihood Estimation on Dataset.')
             print('--------------------------------------------------------------------------')
-            for epoch in range(self.opt.max_epochs):
+
+            for epoch in range(1, 1+self.opt.max_epochs):
 
                 # Update Learning Rate
                 if epoch > self.opt.learning_rate_decay_start and self.opt.learning_rate_decay_start >= 1:
@@ -115,22 +128,18 @@ class Trainer(object):
 
                 # For each Iteration,
                 for iter, (images, captions, lengths, imgids) in enumerate(self.trainloader):
+
                     # Set Network model as Training mode
                     self.encoder.train()
-                    # self.decoder.train()
                     self.decoderPolicyGradient.train()
 
-                    # Set Timer
-                    torch.cuda.synchronize()
-                    start = time.time()
-
                     # Set mini-batch dataset
-                    images   = Variable(images)
-                    captions = Variable(captions)
+                    images   =  Variable(images)
+                    captions =  Variable(captions)
                     states   = (Variable(torch.zeros(self.opt.num_layers, images.size(0), self.opt.hidden_size)),
                                 Variable(torch.zeros(self.opt.num_layers, images.size(0), self.opt.hidden_size)))
 
-
+                    # Set Variables to Support CUDA Computations
                     if self.num_gpu > 0:
                         images   = images.cuda()
                         captions = captions.cuda()
@@ -139,10 +148,10 @@ class Trainer(object):
                     # Pack-Padded Sequence for Ground Truth Sentence
                     targets = pack_padded_sequence(captions, lengths, batch_first=True)[0]
 
-                    # Forward, Backward and Optimize
+                    # Set Gradients of All Models Parameters and Optimizer to Zero
                     self.encoder.zero_grad()
-                    # self.decoder.zero_grad()
                     self.decoderPolicyGradient.zero_grad()
+                    self.optimizer.zero_grad()
 
                     # Improved Image Captioning via Policy Gradient Optimization of SPIDEr (REINFORCE)
                     # Extract Image Features
@@ -153,30 +162,30 @@ class Trainer(object):
                     # Get Generated Sequence (Scores)
                     #  - Input:  features[128x256], length[128](lengths of each sentence)
                     #  - Output: actions[128x<length>], rewards[128x<length>]
-                    outputs, _, _ = self.decoderPolicyGradient(features, captions, states, lengths, self.opt.MC_rollouts, MCRollouts=False)
+                    outputs = self.decoderPolicyGradient(features, captions, states, lengths)
 
-                    # Training the Network using MLE
-                    # Calculate loss and Optimize the Network
+                    # Training the Network using MLE : Calculate loss and Optimize the Network
                     loss = self.criterion(outputs, targets)
                     loss.backward()
                     clip_gradient(self.optimizer, self.opt.grad_clip)
                     self.optimizer.step()
 
-                    # Get Timer
-                    torch.cuda.synchronize()
-                    end = time.time()
-
                     # Display Information
                     if iter % self.opt.log_step == 0:
-                        print('[Loss: MLE] Epoch [%d/%d], Step [%d/%d], Loss: %.4f, Perplexity: %5.4f'
-                              % (epoch, self.opt.max_epochs, iter, self.total_train_iter, loss.data[0], np.exp(loss.data[0])))
+                        print('[Loss: MLE] Epoch [%2d/%2d], Step [%4d/%4d], Loss: %2.4f, Perplexity: %6.4f, lr: %1.1e'
+                              % (epoch, self.opt.max_epochs, iter, self.total_train_iter, loss.data[0], np.exp(loss.data[0]), self.opt.current_lr))
+
+                    # Delete Variables
+                    del self.decoderPolicyGradient.outputs[:]
+                    del self.decoderPolicyGradient.actions[:]
 
                 # Make evaluation on validation set, and save model
                 val_loss, predictions, lang_stats = evaluationPolicyGradient(self.encoder, self.decoderPolicyGradient, self.criterion, self.validloader, self.vocab, self.opt)
+                print(lang_stats)
 
                 # Save the Pre-trained Model for Every Epoch
-                torch.save(self.encoder.state_dict(),               os.path.join('model/', 'Pre-trained-encoder-epoch%d.pkl'               % (epoch + 1)))
-                torch.save(self.decoderPolicyGradient.state_dict(), os.path.join('model/', 'Pre-trained-decoderPolicyGradient-epoch%d.pkl' % (epoch + 1)))
+                torch.save(self.encoder.state_dict(),               os.path.join('model/', 'Pre-trained-encoder-epoch%d.pkl'               % (epoch)))
+                torch.save(self.decoderPolicyGradient.state_dict(), os.path.join('model/', 'Pre-trained-decoderPolicyGradient-epoch%d.pkl' % (epoch)))
 
         # Second, Train Baseline, B_phi, using Monte Carlo estimates of Q_theta on a small subset of Dataset.
         for epoch in range(1):
@@ -186,9 +195,15 @@ class Trainer(object):
 
         # DEBUG 'model - sample'
         if 0:
+            print('---------------------------------------------------------------------------------------------------')
             print('DEBUG:: Evaluate Policy Gradient')
+            print('---------------------------------------------------------------------------------------------------')
             # Make evaluation on validation set, and save model
-            val_loss, predictions, lang_stats = evaluationPolicyGradient(self.encoder, self.decoderPolicyGradient, self.criterion, self.validloader, self.vocab, self.opt)
+            coco = COCO('data/MSCOCO/annotations/captions_val2014.json')
+            valids = coco.getImgIds()
+            val_loss, predictions, lang_stats = evaluationPolicyGradient(self.encoder, self.decoderPolicyGradient, self.criterion, self.validloader, self.vocab, self.opt, coco, valids)
+            predictions = []
+            print(lang_stats)
 
         # Third, Train the Model using REINFORCE with Monte Carlo Rollouts
         if 1:
@@ -213,79 +228,55 @@ class Trainer(object):
                     self.encoder.train()
                     self.decoderPolicyGradient.train()
 
-                    # Set Timer
-                    # torch.cuda.synchronize()
-                    # start = time.time()
-
                     # Set mini-batch dataset for Policy Gradient
-                    images   = Variable(images)
-                    captions = Variable(captions)
+                    images   =  Variable(images)
+                    captions =  Variable(captions)
                     states   = (Variable(torch.zeros(self.opt.num_layers, images.size(0), self.opt.hidden_size)),
                                 Variable(torch.zeros(self.opt.num_layers, images.size(0), self.opt.hidden_size)))
 
-                    # Set GPU
+                    # Set Variables to Support CUDA Computations
                     if self.num_gpu > 0:
-                        # Set mini-batch dataset for Policy Gradient
                         images = images.cuda()
                         captions = captions.cuda()
                         states = [s.cuda() for s in states]
 
-                    # Pack-Padded Sequence for Ground Truth Sentence
-                    # targets = pack_padded_sequence(captions, lengths, batch_first=True)[0]
-
-                    # Forward, Backward and Optimize
+                    # Set Gradients of All Models Parameters and Optimizer to Zero
                     self.encoder.zero_grad()
                     self.decoderPolicyGradient.zero_grad()
+                    self.optimizer.zero_grad()
 
                     # Improved Image Captioning via Policy Gradient Optimization of SPIDEr (REINFORCE)
                     # Extract Image Features
                     #  - Input:  images[128x3x224x224]
                     #  - Output: features[128x256]
-                    features          = self.encoder(images)
+                    features = self.encoder(images)
 
                     # Generate Sequence g_1:T ~ Policy(.|Image) with Ground Truth (Training)
                     #  - Input:  features[128x256], length[128](lengths of each sentence)
                     #  - Output: outputs[<length>x10372], actions[128x<length>], rewards[128x<length>]
                     # _, actions, actions_rollouts = self.decoderPolicyGradient(features, captions, states, lengths, self.opt.MC_rollouts, MCRollouts=True)
-                    _ = self.decoderPolicyGradient(features, captions, states, lengths, self.opt.MC_rollouts, MCRollouts=True)
-                    '''
-                    # Convert actions_rollouts(word indexes) to sentences
-                    predictions = []
-                    # sampled_ids = actions_rollouts[:, 1:].cpu().data.numpy()  # Rollouts without <start>
-                    # sampled_ids = actions_rollouts.cpu().data.numpy()
-                    sampled_ids = actions_rollouts
-                    sampled_ids = sampled_ids[:, 1:]
-                    result_sentences = []
-                    for sentence_ids in sampled_ids:
-                        sampled_caption = []
-                        for word_id in sentence_ids:
-                            word = self.vocab.idx2word[word_id]
-                            if word == '<end>':
-                                break
-                            sampled_caption.append(word)
-                        sentence = ' '.join(sampled_caption)
-                        result_sentences.append(sentence)
-                    for i, sentence in enumerate(result_sentences):
-                        entry = {'image_id': imgids[i % len(imgids)], 'caption': sentence}
-                        predictions.append(entry)
+                    _ = self.decoderPolicyGradient(features, captions, states, lengths)
 
-                    '''
+                    # Monte Carlo Rollouts #1 - Every Rollout shares only one LSTM
+                    # Monte Carlo Rollouts #2 - Each Rollout has own LSTM
+                    predictions = self.decoderPolicyGradient.getMonteCarloRollouts(self.opt.MC_rollouts, lengths, imgids, self.vocab, flag=True)
 
                     if 0:
                         torch.set_printoptions(edgeitems=100, linewidth=160)
+                        print(predictions)
 
                     # Calculate Rewards - Evaluate COCO Metrics
                     rewards = []
                     rewards_rollouts = []
                     lang_stat_rollouts = []
                     for k in range(self.opt.MC_rollouts*(max(lengths)-1)):
-                        if 0:
-                            lang_stat = language_eval(predictions[k * len(lengths):(k + 1) * len(lengths)])  # Batch-Based
+                        if 1:
+                            lang_stat = language_eval(predictions[k * len(lengths):(k + 1) * len(lengths)], self.coco, self.valids)  # Batch-Based
                             BCMR = + 0.5 * lang_stat['Bleu_1'] + 0.5 * lang_stat['Bleu_2'] \
                                    + 1.0 * lang_stat['Bleu_3'] + 1.0 * lang_stat['Bleu_4'] \
                                    + 1.0 * lang_stat['CIDEr']  + 5.0 * lang_stat['METEOR'] + 2.0 * lang_stat['ROUGE_L']
                             lang_stat_rollouts.append(lang_stat)
-                        BCMR = 1
+                        # BCMR = 1
                         rewards_rollouts.append(BCMR)
 
                     for idx in range(len(rewards_rollouts)/self.opt.MC_rollouts):
@@ -307,39 +298,38 @@ class Trainer(object):
                     #  -       r: float
                     for action, r in zip(self.decoderPolicyGradient.actions[1:], rewards):
                         action.reinforce(r)
-                    self.optimizer.zero_grad()
                     autograd.backward(self.decoderPolicyGradient.actions[1:], [None for _ in self.decoderPolicyGradient.actions[1:]])
                     clip_gradient(self.optimizer, self.opt.grad_clip)
                     self.optimizer.step()
 
-                    # Get Timer
-                    # torch.cuda.synchronize()
-                    # end = time.time()
-
-                    del images
-                    del captions
-                    del states
-                    del features
-                    del self.decoderPolicyGradient.actions[:]
-                    self.decoderPolicyGradient.actions_rollouts = []
-                    del rewards
-                    del rewards_rollouts[:]
-
                     # Display Information :: REINFORCE
                     if iter % self.opt.log_step == 0:
-                        print('[REINFORCE] Epoch [%d/%d], Step [%d/%d], Rewards[min/avg/max]: [%.4f/%.4f/%.4f], Perplexity: [%5.4f/%5.4f/%5.4f]'
-                              % (epoch, self.opt.max_epochs, iter, self.total_train_iter, rewards_min, rewards_avg, rewards_max, np.exp(rewards_min), np.exp(rewards_avg), np.exp(rewards_max)))
+                        print('[REINFORCE] Epoch [%2d/%2d], Step [%4d/%4d], Rewards[min/avg/max]: [%.4f/%.4f/%.4f], Perplexity: [%6.4f/%6.4f/%6.4f], lr: %1.1e'
+                              % (epoch, self.opt.max_epochs, iter, self.total_train_iter, rewards_min, rewards_avg, rewards_max, np.exp(rewards_min), np.exp(rewards_avg), np.exp(rewards_max), self.opt.current_lr))
+                        log_print = '[REINFORCE] Epoch [%2d/%2d], Step [%4d/%4d], Rewards[min/avg/max]: [%.4f/%.4f/%.4f], Perplexity: [%6.4f/%6.4f/%6.4f], lr: %1.1e' % \
+                                    (epoch, self.opt.max_epochs, iter, self.total_train_iter, rewards_min, rewards_avg, rewards_max, np.exp(rewards_min), np.exp(rewards_avg), np.exp(rewards_max), self.opt.current_lr)
+                        with open('log.txt', 'a') as f:
+                            f.write(log_print)
+                            f.write('\n')
+
+
+
+                    # Delete Variables
+                    del self.decoderPolicyGradient.outputs[:]
+                    del self.decoderPolicyGradient.actions[:]
 
                 # Make evaluation on validation set, and save model
-                val_loss, predictions, lang_stats = evaluationPolicyGradient(self.encoder, self.decoderPolicyGradient, self.criterion, self.validloader, self.vocab, self.opt)
+                coco = COCO('data/MSCOCO/annotations/captions_val2014.json')
+                valids = coco.getImgIds()
+                val_loss, predictions, lang_stats = evaluationPolicyGradient(self.encoder, self.decoderPolicyGradient, self.criterion, self.validloader, self.vocab, self.opt, coco, valids)
+                print(lang_stats)
 
                 # Save the Pre-trained Model for Every Epoch
-                torch.save(self.encoder.state_dict(),               os.path.join('model/', 'PolicyGradient-encoder-epoch%d.pkl'               % (epoch + 1)))
-                torch.save(self.decoderPolicyGradient.state_dict(), os.path.join('model/', 'PolicyGradient-decoderPolicyGradient-epoch%d.pkl' % (epoch + 1)))
+                torch.save(self.encoder.state_dict(),               os.path.join('model/', 'REINFORCE-encoder-epoch%d.pkl'               % (epoch)))
+                torch.save(self.decoderPolicyGradient.state_dict(), os.path.join('model/', 'REINFORCE-decoderPolicyGradient-epoch%d.pkl' % (epoch)))
 
 
 if __name__ == '__main__':
-
 
     parser = argparse.ArgumentParser()
 
