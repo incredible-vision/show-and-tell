@@ -246,8 +246,8 @@ class Trainer(object):
                     # Generate Sequence g_1:T ~ Policy(.|Image) with Ground Truth (Training)
                     #  - Input:  features[128x256], length[128](lengths of each sentence)
                     #  - Output: outputs[<length>x10372], actions[128x<length>], rewards[128x<length>]
-                    _, actions, actions_rollouts = self.decoderPolicyGradient(features, captions, states, lengths, self.opt.MC_rollouts, MCRollouts=True)
-
+                    # _, actions, actions_rollouts = self.decoderPolicyGradient(features, captions, states, lengths, self.opt.MC_rollouts, MCRollouts=True)
+                    _ = self.decoderPolicyGradient(features, captions, states, lengths, self.opt.MC_rollouts, MCRollouts=True)
                     '''
                     # Convert actions_rollouts(word indexes) to sentences
                     predictions = []
@@ -305,10 +305,10 @@ class Trainer(object):
                     #  -  action: Variable[torch.LongTensor of size 1x1]
                     #  - rewards: [torch.FloatTensor of size 31]
                     #  -       r: float
-                    for action, r in zip(actions[1:], rewards):
+                    for action, r in zip(self.decoderPolicyGradient.actions[1:], rewards):
                         action.reinforce(r)
                     self.optimizer.zero_grad()
-                    autograd.backward(actions[1:], [None for _ in actions[1:]])
+                    autograd.backward(self.decoderPolicyGradient.actions[1:], [None for _ in self.decoderPolicyGradient.actions[1:]])
                     clip_gradient(self.optimizer, self.opt.grad_clip)
                     self.optimizer.step()
 
@@ -320,8 +320,8 @@ class Trainer(object):
                     del captions
                     del states
                     del features
-                    del actions[:]
-                    del actions_rollouts
+                    del self.decoderPolicyGradient.actions[:]
+                    self.decoderPolicyGradient.actions_rollouts = []
                     del rewards
                     del rewards_rollouts[:]
 

@@ -84,6 +84,10 @@ class DecoderPolicyGradient(nn.Module):
         self.ss_prob = 0
         self.init_weights()
 
+        self.actions = []
+        self.actions_rollouts = []
+
+
     def init_weights(self):
         """Initialize weights."""
         self.embed.weight.data.uniform_(-0.1, 0.1)
@@ -108,8 +112,8 @@ class DecoderPolicyGradient(nn.Module):
     def forward(self, features, captions, states, lengths, K, MCRollouts=False):
         # Initialize Output Variables
         outputs = []
-        actions = []
-        actions_rollouts = []  # actions_rollouts = Variable(torch.zeros(len(lengths)*K*max(lengths), max(lengths))).cuda().long()
+        # actions = []
+        # actions_rollouts = []  # actions_rollouts = Variable(torch.zeros(len(lengths)*K*max(lengths), max(lengths))).cuda().long()
 
         # Initialize LSTM Input (Image Features)
         inputs = features.unsqueeze(1)
@@ -123,45 +127,45 @@ class DecoderPolicyGradient(nn.Module):
                 hiddens, states = self.lstm(inputs, states)         # (batch_size, 1, hidden_size)
                 output = self.linear(hiddens.squeeze(1))            # (batch_size, vocab_size)
                 inputs = self.embed(captions[:, t]).unsqueeze(1)    # Ground Truth
-                outputs.append(output)
+                # outputs.append(output)
                 # Select Stochastic Actions
                 distribution = nn.functional.softmax(output)
                 action = torch.multinomial(distribution, 1, True)  # {Variable} [torch.LongTensor of size 1x1]
                 # Append Results to List Variables
-                actions.append(action)
+                self.actions.append(action)
                 action_detached = action.detach()
-                actions_rollouts.append(action_detached.repeat(cols, 1))
+                self.actions_rollouts.append(action_detached.data.repeat(cols, 1))
             # For Every State,
             for t in range(2, max(lengths)):
                 # Get LSTM Network Output
                 hiddens, states = self.lstm(inputs, states)         # (batch_size, 1, hidden_size)
                 output = self.linear(hiddens.squeeze(1))            # (batch_size, vocab_size)
                 inputs = self.embed(captions[:, t]).unsqueeze(1)    # Ground Truth
-                outputs.append(output)
+                # outputs.append(output)
                 # Select Stochastic Actions
                 distribution = nn.functional.softmax(output)
                 action = torch.multinomial(distribution, 1, True)  # {Variable} [torch.LongTensor of size 1x1]
                 # Select Stochastic MC Rollouts & Append Results to List Variable
-                actions.append(action)
+                self.actions.append(action)
                 action_detached = action.detach()
-                distribution_rollouts = distribution.detach()
-                actions_rollouts.append(
-                    torch.cat((torch.multinomial(distribution_rollouts.repeat(K*(t-1), 1), 1, True),
-                               action_detached.repeat(cols-K*(t-1), 1)), 0))
+                distribution_detached = distribution.detach()
+                self.actions_rollouts.append(
+                    torch.cat((torch.multinomial(distribution_detached.data.repeat(K*(t-1), 1), 1, True),
+                               action_detached.data.repeat(cols-K*(t-1), 1)), 0))
 
             # Modify Types of Variables
-            actions_rollouts = torch.stack(actions_rollouts, 1).squeeze()
+            self.actions_rollouts = torch.stack(self.actions_rollouts, 1).squeeze()
             # Modify Types of Variables
-            outputs = torch.cat(outputs, 1).view(len(lengths), max(lengths), -1)
+            # outputs = torch.cat(outputs, 1).view(len(lengths), max(lengths), -1)
             # Modify Types of Variables into Pack-padded Sequence
-            outputs = pack_padded_sequence(outputs, lengths, batch_first=True)[0]
+            # outputs = pack_padded_sequence(outputs, lengths, batch_first=True)[0]
             if 0:
                 print('---------------------')
                 torch.set_printoptions(edgeitems=100, linewidth=160)
                 print('actions')
-                print(actions)
+                print(self.actions)
                 print('actions_rollouts')
-                print(actions_rollouts)
+                print(self.actions_rollouts)
                 print('---------------------')
 
         # Vanilla Training
@@ -177,9 +181,11 @@ class DecoderPolicyGradient(nn.Module):
             # Modify Types of Variables into Pack-padded Sequence
             # outputs = pack_padded_sequence(outputs, lengths, batch_first=True)[0]
 
-        actions_rollouts = actions_rollouts.data.cpu().numpy()
+        self.actions_rollouts = self.actions_rollouts.cpu().numpy()
 
-        return outputs, actions, actions_rollouts
+        outputs.append(1)
+
+        return outputs
 
 
     # Get Pack-padded sequence batch sizes.
