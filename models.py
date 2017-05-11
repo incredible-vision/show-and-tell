@@ -224,6 +224,12 @@ class DecoderPolicyGradient(nn.Module):
         return torch.stack(actions, 1).squeeze()
 
     def getSentences(self, actions_rollouts, imgids, vocab):
+
+        tmp = 453611
+        if tmp in imgids:
+            print('453611')
+
+
         # Initialize List Variables
         predictions = []
         result_sentences = []
@@ -238,6 +244,10 @@ class DecoderPolicyGradient(nn.Module):
             result_sentences.append(sentence)
         for i, sentence in enumerate(result_sentences):
             entry = {'image_id': imgids[i % len(imgids)], 'caption': sentence}
+
+            if isinstance(entry['caption'], list):
+                print('453611')
+
             predictions.append(entry)
         return predictions
 
@@ -246,10 +256,8 @@ class DecoderPolicyGradient(nn.Module):
         lang_stat_rollouts = []
         for k in range(K * (maxlen - 1)):
             if 1:
-                # lang_stat = language_eval(predictions[k * len(lengths):(k + 1) * len(lengths)], coco_train, valids_train)  # Batch-Based
-
-                lang_stat = language_eval(predictions, coco_train, valids_train)
-
+                lang_stat = language_eval(predictions[k * len(lengths):(k + 1) * len(lengths)], coco_train, valids_train)  # Batch-Based
+                # lang_stat = language_eval(predictions, coco_train, valids_train)
                 BCMR = + 0.5 * lang_stat['Bleu_1'] + 0.5 * lang_stat['Bleu_2'] \
                        + 1.0 * lang_stat['Bleu_3'] + 1.0 * lang_stat['Bleu_4'] \
                        + 1.0 * lang_stat['CIDEr'] + 5.0 * lang_stat['METEOR'] + 2.0 * lang_stat['ROUGE_L']

@@ -220,8 +220,10 @@ class Trainer(object):
                 # For each Iteration,
                 for iter, (images, captions, lengths, imgids) in enumerate(self.trainloader):
 
-                    if 0:
-                        print('iteration: %d' % iter)
+                    if len(imgids) < self.opt.batch_size:
+                        print('Selected Batch size(%d) is not same as batch size' % len(imgids))
+                        print(imgids)
+                        continue
 
                     # Set Network model as Training mode
                     self.encoder.train()
@@ -258,7 +260,7 @@ class Trainer(object):
                     #  - Input:  features[128x256], length[128](lengths of each sentence)
                     #  - Output: outputs[<length>x10372], actions[128x<length>], rewards[128x<length>]
                     # _, actions, actions_rollouts = self.decoderPolicyGradient(features, captions, states, lengths, self.opt.MC_rollouts, MCRollouts=True)
-                    maxSequenceLength = 20
+                    maxSequenceLength = 15
                     _ = self.decoderPolicyGradient(features, captions, states, maxSequenceLength, lengths, gt=False)
 
                     # Monte Carlo Rollouts #1 - Every Rollout shares only one LSTM
