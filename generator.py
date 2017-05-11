@@ -39,29 +39,35 @@ class GeneratorModel(nn.Module):
 
     def forward(self, images, captions, lengths):
 
+        packed, batch_sizes = pack_padded_sequence(captions, lengths, batch_first=True)
+
         start_word = torch.ones(images.size(0))
-        embeddings = self.embedding(Variable(start_word.long()).cuda())
+        embedding = self.embedding(Variable(start_word.long()).cuda())
+
         """Samples captions for given image features (Greedy search)."""
-        sampled_ids = []
         features = self.encoder(images)  # [batch, 512, 14, 14]
         features = features.view(features.size(0), features.size(1), -1).transpose(2, 1)  # [batch, 196, 512]
         context_encode = torch.bmm(features, self.image_att_w.unsqueeze(0).expand(features.size(0), self.image_att_w.size(0), self.image_att_w.size(1)))  # [batch, 196, 512]
 
         hidden, c = self.init_lstm(features)
 
-        for i in range(20):  # maximum sampling length
-            context, alpha = self.attention_layer(features, context_encode, hidden)
-            if i == 0:
-                rnn_input = torch.cat([embeddings, context], dim=1)
-            hidden, c = self.lstmcell(rnn_input, (hidden, c))  # (batch_size, 1, hidden_size)
-            outputs = self.output_layer(context, hidden)  # (batch_size, vocab_size)
-            predicted = outputs.max(1)[1]
-            sampled_ids.append(predicted)
-            embedding = self.embedding(predicted).squeeze(1)
-            rnn_input = torch.cat([embedding, context], dim=1)
-        sampled_ids = torch.cat(sampled_ids, 1)  # (batch_size, 20)
+        outputs = []
 
-        return sampled_ids.squeeze()
+        for i, batch_size in enumerate(batch_sizes):  # maximum sampling length
+            context, alpha = self.attention_layer(features[:batch_size], context_encode[:batch_size], hidden[:batch_size])
+
+            rnn_input = torch.cat([embedding, context], dim=1)
+            hidden, c = self.lstmcell(rnn_input, (hidden, c))  # (batch_size, 1, hidden_size)
+            output = self.output_layer(context, hidden) # (batch_size, vocab_size)
+            outputs.append(output)
+            log_prob = F.log_softmax(output)
+            action = log_prob.multinomial(1, True)
+            embedding = self.embedding(action).squeeze(1)
+
+            # rnn_input = torch.cat([embedding, context], dim=1)
+        actions = torch.cat(actions, 0)  # (batch_size, 20)
+
+        return actions
 
     def init_weight(self):
         """"""

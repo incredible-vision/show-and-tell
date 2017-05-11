@@ -8,8 +8,9 @@ import pickle
 import json
 from data_loader import get_loader
 from utils import Vocabulary
-from models import EncoderCNN, DecoderRNN
+from models import ShowTellModel
 from model import ShowAttendTellModel
+from generator import GeneratorModel
 from torch.autograd import Variable
 import torch.optim as optim
 from torch.nn.utils.rnn import pack_padded_sequence
@@ -34,8 +35,8 @@ class Trainer(object):
         with open(opt.vocab_path, 'rb') as f:
             self.vocab = pickle.load(f)
 
-        self.model = ShowAttendTellModel(opt.hidden_size, opt.embed_size, len(self.vocab), opt.embed_size, opt)
-
+        # self.model = GeneratorModel(opt.hidden_size, opt.embed_size, len(self.vocab), opt.embed_size, opt)
+        self.model = ShowTellModel(opt.embed_size, opt.hidden_size, len(self.vocab), 1)
 
         if self.num_gpu == 1:
             self.model.cuda()
@@ -46,12 +47,15 @@ class Trainer(object):
         if self.opt.load_pretrained:
             if self.load_model_path:
                 self.load_model()
+                print('pretrained model loaded')
 
             if self.load_optimizer_path:
                 self.load_optimizer()
 
+        """ This criterion combines LogSoftMax and NLLLoss in one single class """
         self.criterion = nn.CrossEntropyLoss()
 
+        """ only update trainable parameters """
         parameters = filter(lambda p: p.requires_grad, self.model.parameters())
         self.optimizer = optim.Adam(parameters, lr=opt.learning_rate)
 
@@ -59,7 +63,7 @@ class Trainer(object):
 
     def load_model(self):
         """"""
-        return self.model.load_state_dict(torch.load(os.path.join(self.opt.expr_dir, 'model.pth')))
+        return self.model.load_state_dict(torch.load(os.path.join(self.opt.expr_dir, 'model-best.pth')))
 
     def load_optimizer(self):
         """"""
@@ -68,6 +72,7 @@ class Trainer(object):
     def train(self):
 
         infos = {}
+
 
         if self.opt.start_from is not None and not self.opt.load_pretrained:
 
@@ -97,8 +102,6 @@ class Trainer(object):
                 group['lr'] = lr
 
         for epoch in range(1, 1 + self.opt.max_epochs):
-            if epoch < loaded_epoch:
-                continue
 
             if epoch > self.opt.learning_rate_decay_start and self.opt.learning_rate_decay_start >= 1:
                 fraction = (epoch - self.opt.learning_rate_decay_start) // self.opt.learning_rate_decay_every
@@ -107,6 +110,9 @@ class Trainer(object):
                 set_lr(self.optimizer, self.opt.current_lr)
             else:
                 self.opt.current_lr = self.opt.learning_rate
+
+            if epoch < loaded_epoch:
+                continue
 
             for iter, (images, captions, lengths, imgids) in enumerate(self.trainloader):
 
@@ -133,8 +139,6 @@ class Trainer(object):
                 self.model.zero_grad()
 
                 outputs = self.model(images, captions[:,:-1], lengths)
-
-
 
                 loss = self.criterion(outputs, targets)
                 loss.backward()

@@ -6,6 +6,65 @@ import math
 from torch.nn.utils.rnn import pack_padded_sequence
 from torch.autograd import Variable
 
+class ShowTellModel(nn.Module):
+    def __init__(self, embed_size, hidden_size, vocab_size, num_layers):
+        super(ShowTellModel, self).__init__()
+        """ define encoder """
+        self.encoder = models.resnet152(pretrained=True)
+        for param in self.encoder.parameters():
+            param.requires_grad = False
+        self.encoder.fc = nn.Linear(self.encoder.fc.in_features, embed_size)
+        self.bn = nn.BatchNorm1d(embed_size, momentum=0.01)
+
+        """ define decoder """
+        self.embed = nn.Embedding(vocab_size, embed_size)
+        self.lstm = nn.LSTM(embed_size, hidden_size, num_layers, batch_first=True)
+        self.linear = nn.Linear(hidden_size, vocab_size)
+
+        self.init_weights()
+
+    def init_weights(self):
+        """"""
+        """Initialize encoder weights."""
+        self.encoder.fc.weight.data.normal_(0.0, 0.02)
+        self.encoder.fc.bias.data.fill_(0)
+
+        """Initialize decoder weights."""
+        self.embed.weight.data.uniform_(-0.1, 0.1)
+        self.linear.weight.data.uniform_(-0.1, 0.1)
+        self.linear.bias.data.fill_(0)
+
+    def forward(self, images, captions, lengths):
+        """"""
+        """Extract the image feature vectors."""
+        features = self.encoder(images)
+        features = self.bn(features)
+
+        """Decode image feature vectors and generates captions."""
+        embeddings = self.embed(captions)
+        embeddings = torch.cat((features.unsqueeze(1), embeddings), 1)
+        packed = pack_padded_sequence(embeddings, lengths, batch_first=True)
+        hiddens, _ = self.lstm(packed)
+        outputs = self.linear(hiddens[0])
+
+        return outputs
+
+    def sample(self, images, states):
+        """Samples captions for given image features (Greedy search)."""
+        features = self.encoder(images)
+        features = self.bn(features)
+
+        sampled_ids = []
+        inputs = features.unsqueeze(1)
+        for i in range(20):  # maximum sampling length
+            hiddens, states = self.lstm(inputs, states)  # (batch_size, 1, hidden_size)
+            outputs = self.linear(hiddens.squeeze(1))  # (batch_size, vocab_size)
+            predicted = outputs.max(1)[1]
+            sampled_ids.append(predicted)
+            inputs = self.embed(predicted)
+        sampled_ids = torch.cat(sampled_ids, 1)  # (batch_size, 20)
+        return sampled_ids.squeeze()
+
 class EncoderCNN(nn.Module):
     def __init__(self, embed_size):
         """Load the pretrained ResNet-152 and replace top fc layer."""
@@ -35,7 +94,7 @@ class DecoderRNN(nn.Module):
         self.embed = nn.Embedding(vocab_size, embed_size)
         self.lstm = nn.LSTM(embed_size, hidden_size, num_layers, batch_first=True)
         self.linear = nn.Linear(hidden_size, vocab_size)
-        self.ss_prob = 0
+
         self.init_weights()
 
     def init_weights(self):

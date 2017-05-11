@@ -106,7 +106,8 @@ class ShowAttendTellModel(nn.Module):
     def output_layer(self, context, hidden, prev=None):
         context = self.context2out(context)
         hidden = self.hidden2tout(hidden)
-        out = self.classifier(context + hidden)
+        out = self.dropout(F.tanh(context+hidden))
+        out = self.classifier(out)
 
         return out
 

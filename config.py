@@ -20,27 +20,27 @@ def parse_opt():
 
     parser.add_argument('--expr_dir', type=str, default='experiment', help='experiment directory')
 
-    parser.add_argument('--exp_id', type=str, default='showattendtell', help='experiment id')
+    parser.add_argument('--exp_id', type=str, default='showtell', help='experiment id')
     parser.add_argument('--user_id', type=str, default='myunggi', help='user id')
     parser.add_argument('--start_from', type=str, default=None, help='continue from this configurations')
 
-    parser.add_argument('--embed_size', type=int, default=512, help='dimension of word embedding vectors')
-    parser.add_argument('--hidden_size', type=int, default=1024, help='dimension of lstm hidden states')
+    parser.add_argument('--embed_size', type=int, default=256, help='dimension of word embedding vectors')
+    parser.add_argument('--hidden_size', type=int, default=512, help='dimension of lstm hidden states')
 
     parser.add_argument('--num_layers', type=int, default=1, help='number of layers in lstm')
 
     parser.add_argument('--load_best_score', action="store_true", default=True)
-    parser.add_argument('--load_model_path', type=str, default=None)
-    parser.add_argument('--load_optim_path', type=str, default=None)
+    parser.add_argument('--load_model_path', action="store_true", default=False)
+    parser.add_argument('--load_optim_path', action="store_true", default=False)
     parser.add_argument('--load_pretrained', action='store_false', default=False)
 
-    parser.add_argument('--learning_rate', type=float, default=0.01)
+    parser.add_argument('--learning_rate', type=float, default=0.001)
     parser.add_argument('--max_epochs', type=int, default=20)
 
     parser.add_argument('--learning_rate_decay_start', type=int, default=1, help='at what iteration to start decaying learning rate? (-1 = dont) (in epoch)')
     parser.add_argument('--learning_rate_decay_every', type=int, default=3, help='every how many iterations thereafter to drop LR?(in epoch)')
     parser.add_argument('--learning_rate_decay_rate', type=float, default=0.8, help='every how many iterations thereafter to drop LR?(in epoch)')
-    parser.add_argument('--grad_clip', type=float, default=0.1,  # 5.,
+    parser.add_argument('--grad_clip', type=float, default=0.5,  # 5.,
                         help='clip gradients at this value')
 
     parser.add_argument('--scheduled_sampling_start', type=int, default=-1,

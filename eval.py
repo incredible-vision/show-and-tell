@@ -78,14 +78,14 @@ def evaluation(model, crit, loader, vocab, opt):
         images = Variable(images, volatile=True)
         captions = Variable(captions, volatile=True)
 
-        state = (Variable(torch.zeros(images.size(0), opt.hidden_size), volatile=True),
-                 Variable(torch.zeros(images.size(0), opt.hidden_size), volatile=True))
+        state = (Variable(torch.zeros(opt.num_layers, images.size(0), opt.hidden_size), volatile=True),
+                 Variable(torch.zeros(opt.num_layers, images.size(0), opt.hidden_size), volatile=True))
 
 
         if opt.num_gpu > 0:
             images = images.cuda()
             captions = captions.cuda()
-            state = torch.stack([s.cuda() for s in state])
+            state = [s.cuda() for s in state]
 
         targets = pack_padded_sequence(captions, lengths, batch_first=True)[0]
 
