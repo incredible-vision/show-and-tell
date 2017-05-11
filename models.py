@@ -86,6 +86,8 @@ class DecoderPolicyGradient(nn.Module):
 
         self.outputs = []
         self.actions = []
+        self.inputs  = []
+        self.states  = []
 
 
     def init_weights(self):
@@ -96,44 +98,64 @@ class DecoderPolicyGradient(nn.Module):
 
 
     # At training  time, we always feed in the ground truth(captions) symbol to the RNN decoder.
-    def forward(self, features, captions, states, lengths):
+    def forward(self, features, captions, states, maxlen, lengths, gt=False):
         # Initialize LSTM Input (Image Features)
         inputs = features.unsqueeze(1)
-        # Run LSTM
-        for idx in range(0, max(lengths)):
-            # Get Network Output
-            hiddens, states = self.lstm(inputs, states)  # (batch_size, 1, hidden_size)
-            output = self.linear(hiddens.squeeze(1))  # (batch_size, vocab_size)
-            inputs = self.embed(captions[:, idx]).unsqueeze(1)  # Ground Truth
-            # Get a Stochastic Action (Stochastic Policy)
-            action = self.getStochasticAction(output)
-            # Append Results to List Variables
-            self.outputs.append(output)
-            self.actions.append(action)
+        # Run LSTM with Ground Truth
+        if gt:
+            for idx in range(0, maxlen):
+                # Get Network Output
+                hiddens, states = self.lstm(inputs, states)  # (batch_size, 1, hidden_size)
+                output = self.linear(hiddens.squeeze(1))  # (batch_size, vocab_size)
+                # Get a Stochastic Action (Stochastic Policy)
+                action = self.getStochasticAction(output)
+                # Set LSTM Input with Ground Truth
+                inputs = self.embed(captions[:, idx]).unsqueeze(1)
+                # Append Results to List Variables
+                self.outputs.append(output)
+                self.actions.append(action)
+                self.inputs.append(inputs)
+                self.states.append(states)
+        # Run LSTM with LSTM Output
+        else:
+            for idx in range(0, maxlen):
+                # Get Network Output
+                hiddens, states = self.lstm(inputs, states)  # (batch_size, 1, hidden_size)
+                output = self.linear(hiddens.squeeze(1))  # (batch_size, vocab_size)
+                # Get a Stochastic Action (Stochastic Policy)
+                action = self.getStochasticAction(output)
+                # Set LSTM Input with LSTM Output (Detached!)
+                inputs = self.embed(action.detach())
+                # Append Results to List Variables
+                self.outputs.append(output)
+                self.actions.append(action)
+                self.inputs.append(inputs)
+                self.states.append(states)
         # Convert Output Variable to Pack Padded Sequence
-        outputs = self.convertOutputVariable(lengths)
+        outputs = self.convertOutputVariable(maxlen, lengths)
         return outputs
 
 
     # Monte Carlo Rollouts
-    def getMonteCarloRollouts(self, K, lengths, imgids, vocab, flag=True):
-        if flag:
+    def getMonteCarloRollouts(self, features, states, K, maxlen, gt=False):
+        # Get MC Rollouts with the LSTM generated with Ground Truth
+        if gt:
             # Initialize List Variables
             outputs_detached = []
             actions_detached = []
             actions_rollouts = []
             # Detach Outputs and Actions from the Graph
-            for idx in range(max(lengths)):
+            for idx in range(maxlen):
                 outputs_detached.append(self.outputs[idx].detach())
                 actions_detached.append(self.actions[idx].detach())
             # Calculate Number of Columns
-            cols = K * (max(lengths) - 1)  # [(batch_size x K x max_sentence_length)
+            cols = K * (maxlen - 1)  # [(batch_size x K x max_sentence_length)
             # For Initial States,
             for t in range(0, 2):
                 # Append Results to List Variables
                 actions_rollouts.append(actions_detached[t].data.repeat(cols, 1))
             # For Other States,
-            for t in range(2, max(lengths)):
+            for t in range(2, maxlen):
                 # Select Stochastic Actions
                 distribution = nn.functional.softmax(outputs_detached[t]).detach()
                 # Select Stochastic MC Rollouts & Append Results to List Variable
@@ -143,41 +165,120 @@ class DecoderPolicyGradient(nn.Module):
             # Modify Types of Variables
             actions_rollouts = torch.stack(actions_rollouts, 1).squeeze()
             if 0:
-                print('---------------------')
-                torch.set_printoptions(edgeitems=100, linewidth=160)
-                print('actions')
-                print(self.actions)
-                print('actions_rollouts')
+                torch.set_printoptions(edgeitems=maxlen, linewidth=200)
                 print(actions_rollouts)
-                print('---------------------')
-            # Initialize List Variables
-            predictions = []
-            result_sentences = []
             # Modify Types of Variable
             actions_rollouts_numpy = actions_rollouts.cpu().numpy()
-            for sentence_ids in actions_rollouts_numpy[:, 1:]:
-                sampled_caption = []
-                for word_id in sentence_ids:
-                    word = vocab.idx2word[word_id]
-                    if word == '<end>':
-                        break
-                    sampled_caption.append(word)
-                sentence = ' '.join(sampled_caption)
-                result_sentences.append(sentence)
-            for i, sentence in enumerate(result_sentences):
-                entry = {'image_id': imgids[i % len(imgids)], 'caption': sentence}
-                predictions.append(entry)
 
+        # Get MC Rollouts with the LSTM generated without Ground Truth
         else:
-            print('---')
+            # Initialize LSTM Input (Image Features)
+            inputs = features.unsqueeze(1)
+            # Initialize List Variables
+            outputs_detached = []
+            actions_detached = []
+            actions_rollouts = []
+            # Detach Outputs and Actions from the Graph
+            for idx in range(maxlen):
+                outputs_detached.append(self.outputs[idx].detach())
+                actions_detached.append(self.actions[idx].detach())
+            # Initialize List Variables
+            actions = []
+            # Sampling Actions via Monte Carlo Rollouts
+            for t in range(0, maxlen):
+                # Get Network Output
+                hiddens, states = self.lstm(inputs, states)
+                # Get a Stored Stochastic Action (Stochastic Policy)
+                action = actions_detached[t]
+                # Set LSTM Input with LSTM Output (Detached!)
+                inputs = self.embed(action)
+                # Append Results to List Variables
+                actions.append(actions_detached[t].data)  # Main Actions
+                if t >= 1:
+                    for k in range(K):
+                        inputs_detached = inputs.detach()
+                        states_detached = [s.detach() for s in states]
+                        actions_copied  = list(actions)
+                        actions_rollout = self.getMCRolloutSamples(inputs_detached, states_detached, actions_copied, t, maxlen)
+                        actions_rollouts.append(actions_rollout)
+            # Modify Types of Variables
+            actions_rollouts = torch.stack(actions_rollouts, 0).squeeze().view(-1, maxlen)
+            if 0:
+                torch.set_printoptions(edgeitems=maxlen, linewidth=200)
+                print(actions_rollouts)
+            # Modify Types of Variable
+            actions_rollouts_numpy = actions_rollouts.cpu().numpy()
+        return actions_rollouts_numpy
 
+
+    def getMCRolloutSamples(self, inputs, states, actions, t, maxlen):
+        for idx in range(t, maxlen-1):
+            hiddens, states = self.lstm(inputs, states)
+            output = self.linear(hiddens.squeeze(1))
+            # Get a Stochastic Action (Stochastic Policy)
+            action = self.getStochasticAction(output)
+            # Set LSTM Input with LSTM Output (Detached!)
+            inputs = self.embed(action.detach())
+            # Append a Rollout Action to List Variables
+            actions.append(action.data)
+        return torch.stack(actions, 1).squeeze()
+
+    def getSentences(self, actions_rollouts, imgids, vocab):
+        # Initialize List Variables
+        predictions = []
+        result_sentences = []
+        for sentence_ids in actions_rollouts[:, 1:]:
+            sampled_caption = []
+            for word_id in sentence_ids:
+                word = vocab.idx2word[word_id]
+                if word == '<end>':
+                    break
+                sampled_caption.append(word)
+            sentence = ' '.join(sampled_caption)
+            result_sentences.append(sentence)
+        for i, sentence in enumerate(result_sentences):
+            entry = {'image_id': imgids[i % len(imgids)], 'caption': sentence}
+            predictions.append(entry)
         return predictions
 
+    def getRewardsRollouts(self, predictions, K, lengths, maxlen, coco_train, valids_train):
+        rewards_rollouts = []
+        lang_stat_rollouts = []
+        for k in range(K * (maxlen - 1)):
+            if 1:
+                # lang_stat = language_eval(predictions[k * len(lengths):(k + 1) * len(lengths)], coco_train, valids_train)  # Batch-Based
+
+                lang_stat = language_eval(predictions, coco_train, valids_train)
+
+                BCMR = + 0.5 * lang_stat['Bleu_1'] + 0.5 * lang_stat['Bleu_2'] \
+                       + 1.0 * lang_stat['Bleu_3'] + 1.0 * lang_stat['Bleu_4'] \
+                       + 1.0 * lang_stat['CIDEr'] + 5.0 * lang_stat['METEOR'] + 2.0 * lang_stat['ROUGE_L']
+                lang_stat_rollouts.append(lang_stat)
+            else:
+                BCMR = 1
+            rewards_rollouts.append(BCMR)
+        return rewards_rollouts, lang_stat_rollouts
+
+    def getRewards(self, rewards_rollouts, K):
+        rewards = []
+        for idx in range(len(rewards_rollouts) / K):
+            reward = rewards_rollouts[idx * K] + \
+                     rewards_rollouts[idx * K + 1] + \
+                     rewards_rollouts[idx * K + 2]
+            reward = reward / K
+            rewards.append(reward)
+        rewards = torch.Tensor(rewards)
+        rewardsMax = torch.max(rewards)
+        rewardsMin = torch.min(rewards)
+        rewardsAvg = torch.mean(rewards)
+        # rewards = (rewards - rewards.mean()) / (rewards.std() + np.finfo(np.float32).eps)  # baseline
+        return rewards, rewardsMax, rewardsMin, rewardsAvg
 
     # Get an Action by using Stochastic Policy
     def getStochasticAction(self, output):
         distribution = nn.functional.softmax(output)
-        action = torch.multinomial(distribution, 1, True)
+        # action = torch.multinomial(distribution, 1, True)
+        action = distribution.multinomial()
         return action
 
 
@@ -189,8 +290,8 @@ class DecoderPolicyGradient(nn.Module):
 
 
     # Convert Output Variable to Pack Padded Sequence
-    def convertOutputVariable(self, lengths):
-        outputs = torch.cat(self.outputs, 1).view(len(lengths), max(lengths), -1)
+    def convertOutputVariable(self, maxlen, lengths):
+        outputs = torch.cat(self.outputs, 1).view(len(lengths), maxlen, -1)
         outputs = pack_padded_sequence(outputs, lengths, batch_first=True)[0]
         return outputs
 

@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 import numpy as np
-# import json
+import json
 import simplejson as json
 from json import encoder
 import random
@@ -14,11 +14,10 @@ import sys
 import torch
 from torch.autograd import Variable
 from torch.nn.utils.rnn import pack_padded_sequence
+from pycocotools.coco import COCO
+from pycocoevalcap.eval import COCOEvalCap
 
 def language_eval(preds, coco, valids):
-
-    from pycocotools.coco import COCO
-    from pycocoevalcap.eval import COCOEvalCap
 
     encoder.FLOAT_REPR = lambda o: format(o, '.3f')
     random.seed(time.time())
@@ -26,7 +25,7 @@ def language_eval(preds, coco, valids):
 
     # filter results to only those in MSCOCO validation set (will be about a third)
     preds_filt = [p for p in preds if p['image_id'] in valids]
-    # print('using %d/%d predictions' % (len(preds_filt), len(preds)))
+    print('using %d/%d predictions' % (len(preds_filt), len(preds)))
     json.dump(preds_filt, open('cache/'+tmp_name+'.json', 'w'))
 
     resFile = 'cache/'+tmp_name+'.json'
@@ -45,7 +44,8 @@ def language_eval(preds, coco, valids):
 
     return out
 
-def evaluation(encoder, decoder, crit, loader, vocab, opt, coco, valids):
+
+def evaluation(encoder, decoder, crit, loader, vocab, opt):
     verbose = True
     val_images_use = -1
     lang_eval = 1
@@ -107,6 +107,9 @@ def evaluation(encoder, decoder, crit, loader, vocab, opt, coco, valids):
     return loss_sum/loss_evals, predictions, lang_stats
 
 
+
+
+
 def evaluationPolicyGradient(encoder, decoderPolicyGradient, crit, loader, vocab, opt, coco, valids):
 
     # Set Network Model as Evaluation Mode
@@ -124,7 +127,7 @@ def evaluationPolicyGradient(encoder, decoderPolicyGradient, crit, loader, vocab
         # Set mini-batch dataset
         images   =  Variable(images,   volatile=True)
         captions =  Variable(captions, volatile=True)
-        states   = (Variable(torch.zeros(opt.num_layers, images.size(0), opt.hidden_size), volatile=True),
+        states    = (Variable(torch.zeros(opt.num_layers, images.size(0), opt.hidden_size), volatile=True),
                     Variable(torch.zeros(opt.num_layers, images.size(0), opt.hidden_size), volatile=True))
 
         # Set Variables to Support CUDA Computations
@@ -140,17 +143,16 @@ def evaluationPolicyGradient(encoder, decoderPolicyGradient, crit, loader, vocab
         features = encoder(images)
 
         # Get Generated Sequence (Scores)
-        maxSequenceLength = max(lengths)
-        outputs = decoderPolicyGradient(features, captions, states, maxSequenceLength, lengths, gt=True)
+        outputs = decoderPolicyGradient(features, captions, states, lengths)
 
         # Calculate Loss using MLE : Calculate loss and Optimize the Network
         loss = crit(outputs, targets)
         loss_sum = loss_sum + loss
-        loss_evals = loss_evals + 1
+        loss_evals += 1
 
         # Convert to Sentences
         sampled_ids = decoderPolicyGradient.sample(features, states)
-        sampled_ids = sampled_ids.data.cpu().numpy()
+        sampled_ids = sampled_ids.cpu().data.numpy()
         result_sentences = []
         for sentence_ids in sampled_ids:
             sampled_caption = []
