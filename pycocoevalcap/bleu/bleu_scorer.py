@@ -193,9 +193,9 @@ class BleuScorer(object):
 
     def recompute_score(self, option=None, verbose=0):
         self._score = None
-        return self.compute_score(option, verbose)
+        return self.compute_score(option, verbose=0)
         
-    def compute_score(self, option=None, verbose=0):
+    def compute_score(self, option=None, verbose=10):
         n = self.n
         small = 1e-9
         tiny = 1e-15 ## so that if guess is 0 still return 0
