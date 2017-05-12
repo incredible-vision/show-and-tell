@@ -220,10 +220,20 @@ class Trainer(object):
                 # For each Iteration,
                 for iter, (images, captions, lengths, imgids) in enumerate(self.trainloader):
 
-                    if len(imgids) < self.opt.batch_size:
-                        print('Selected Batch size(%d) is not same as batch size' % len(imgids))
-                        print(imgids)
-                        continue
+                    if 0:
+                        if len(imgids) < self.opt.batch_size:
+                            print('Selected Batch size(%d) is not same as batch size' % len(imgids))
+                            print(imgids)
+                            continue
+
+                        if 453611 or 521652 in imgids:
+                            torch.set_printoptions(edgeitems=100, linewidth=160)
+                            print('453611 ERROR')
+                            print('imgids')
+                            print(imgids)
+                            print('captions')
+                            print(captions)
+                            continue
 
                     # Set Network model as Training mode
                     self.encoder.train()
@@ -270,10 +280,16 @@ class Trainer(object):
 
                     if 0:
                         torch.set_printoptions(edgeitems=100, linewidth=160)
-                        print(predictions)
+                        for prediction in predictions:
+                            print(prediction)
 
                     # Calculate Rewards - Evaluate COCO Metrics
                     rewards_rollouts, lang_stat_rollouts = self.decoderPolicyGradient.getRewardsRollouts(predictions, self.opt.MC_rollouts, lengths, maxSequenceLength, self.coco_train, self.valids_train)
+
+                    if 1:
+                        for idx, lang_stat in enumerate(lang_stat_rollouts):
+                            print('Index: %d, BLEU1: %.4f, BLEU2: %.4f, BLEU3: %.4f, BLEU4: %.4f, CIDER: %.4f, METEOR: %.4f, ROUGE: %.4f'%\
+                                  (idx, lang_stat['Bleu_1'], lang_stat['Bleu_2'], lang_stat['Bleu_3'], lang_stat['Bleu_4'], lang_stat['CIDEr'], lang_stat['METEOR'], lang_stat['ROUGE_L']))
 
                     # Calculate Rewards
                     rewards, rewardsMax, rewardsMin, rewardsAvg = self.decoderPolicyGradient.getRewards(rewards_rollouts, self.opt.MC_rollouts)
@@ -298,7 +314,15 @@ class Trainer(object):
                         with open('log.txt', 'a') as f:
                             f.write(log_print)
                             f.write('\n')
-
+                        with open('log_COCOMetric.txt', 'a') as f:
+                            f.write(log_print)
+                            f.write('\n')
+                            for lang_stat in lang_stat_rollouts:
+                                log_print = 'BLEU1: %.4f, BLEU2: %.4f, BLEU3: %.4f, BLEU4: %.4f, CIDER: %.4f, METEOR: %.4f, ROUGE: %.4f'%\
+                                            (lang_stat['Bleu_1'], lang_stat['Bleu_2'], lang_stat['Bleu_3'], lang_stat['Bleu_4'], lang_stat['CIDEr'], lang_stat['METEOR'], lang_stat['ROUGE_L'])
+                                f.write(log_print)
+                                f.write('\n')
+                            f.write('\n\n')
                     # Delete Variables
                     del self.decoderPolicyGradient.outputs[:]
                     del self.decoderPolicyGradient.actions[:]
@@ -307,7 +331,7 @@ class Trainer(object):
 
                 # Make evaluation on validation set, and save model
                 val_loss, predictions, lang_stats = evaluationPolicyGradient(self.encoder, self.decoderPolicyGradient, self.criterion, self.validloader, self.vocab, self.opt, self.coco_valid, self.valids_valid)
-
+                print('Evaluation with Validation Set')
                 print(lang_stats)
 
                 # Save the Pre-trained Model for Every Epoch

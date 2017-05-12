@@ -224,12 +224,6 @@ class DecoderPolicyGradient(nn.Module):
         return torch.stack(actions, 1).squeeze()
 
     def getSentences(self, actions_rollouts, imgids, vocab):
-
-        tmp = 453611
-        if tmp in imgids:
-            print('453611')
-
-
         # Initialize List Variables
         predictions = []
         result_sentences = []
@@ -244,10 +238,6 @@ class DecoderPolicyGradient(nn.Module):
             result_sentences.append(sentence)
         for i, sentence in enumerate(result_sentences):
             entry = {'image_id': imgids[i % len(imgids)], 'caption': sentence}
-
-            if isinstance(entry['caption'], list):
-                print('453611')
-
             predictions.append(entry)
         return predictions
 
@@ -264,6 +254,7 @@ class DecoderPolicyGradient(nn.Module):
                 lang_stat_rollouts.append(lang_stat)
             else:
                 BCMR = 1
+                lang_stat_rollouts.append(BCMR)
             rewards_rollouts.append(BCMR)
         return rewards_rollouts, lang_stat_rollouts
 
