@@ -247,14 +247,20 @@ class DecoderPolicyGradient(nn.Module):
         for k in range(K * (maxlen - 1)):
             if 1:
                 lang_stat = language_eval(predictions[k * len(lengths):(k + 1) * len(lengths)], coco_train, valids_train)  # Batch-Based
-                # lang_stat = language_eval(predictions, coco_train, valids_train)
                 BCMR = + 0.5 * lang_stat['Bleu_1'] + 0.5 * lang_stat['Bleu_2'] \
                        + 1.0 * lang_stat['Bleu_3'] + 1.0 * lang_stat['Bleu_4'] \
                        + 1.0 * lang_stat['CIDEr'] + 5.0 * lang_stat['METEOR'] + 2.0 * lang_stat['ROUGE_L']
-                lang_stat_rollouts.append(lang_stat)
             else:
                 BCMR = 1
-                lang_stat_rollouts.append(BCMR)
+                lang_stat = {}
+                lang_stat['Bleu_1']  = BCMR
+                lang_stat['Bleu_2']  = BCMR
+                lang_stat['Bleu_3']  = BCMR
+                lang_stat['Bleu_4']  = BCMR
+                lang_stat['CIDEr']   = BCMR
+                lang_stat['METEOR']  = BCMR
+                lang_stat['ROUGE_L'] = BCMR
+            lang_stat_rollouts.append(lang_stat)
             rewards_rollouts.append(BCMR)
         return rewards_rollouts, lang_stat_rollouts
 

@@ -171,12 +171,20 @@ class Trainer(object):
 
                     # Display Information
                     if iter % self.opt.log_step == 0:
-                        print('[Loss: MLE] Epoch [%2d/%2d], Step [%4d/%4d], Loss: %2.4f, Perplexity: %6.4f, lr: %1.1e'
-                              % (epoch, self.opt.max_epochs, iter, self.total_train_iter, loss.data[0], np.exp(loss.data[0]), self.opt.current_lr))
+                        # Save & Print the Log
+                        log_print = '[Loss: MLE] Epoch [%2d/%2d], Step [%4d/%4d], Loss: %2.4f, Perplexity: %6.4f, lr: %1.1e'\
+                                    % (epoch, self.opt.max_epochs, iter, self.total_train_iter, loss.data[0], np.exp(loss.data[0]), self.opt.current_lr)
+                        print(log_print)
+                        savePath = os.path.join(self.opt.expr_dir, self.opt.exp_id + "_MLE_log" + ".txt")
+                        with open(savePath, 'a') as f:
+                            f.write(log_print)
+                            f.write('\n')
 
                     # Delete Variables
                     del self.decoderPolicyGradient.outputs[:]
                     del self.decoderPolicyGradient.actions[:]
+                    del self.decoderPolicyGradient.inputs[:]
+                    del self.decoderPolicyGradient.states[:]
 
                 # Make evaluation on validation set, and save model
                 val_loss, predictions, lang_stats = evaluationPolicyGradient(self.encoder, self.decoderPolicyGradient, self.criterion, self.validloader, self.vocab, self.opt, self.coco_valid, self.valids_valid)
@@ -256,6 +264,9 @@ class Trainer(object):
                         captions = captions.cuda()
                         states = [s.cuda() for s in states]
 
+                    # Pack-Padded Sequence for Ground Truth Sentence
+                    targets = pack_padded_sequence(captions, lengths, batch_first=True)[0]
+
                     # Set Gradients of All Models Parameters and Optimizer to Zero
                     self.encoder.zero_grad()
                     self.decoderPolicyGradient.zero_grad()
@@ -270,21 +281,24 @@ class Trainer(object):
                     #  - Input:  features[128x256], length[128](lengths of each sentence)
                     #  - Output: outputs[<length>x10372], actions[128x<length>], rewards[128x<length>]
                     # _, actions, actions_rollouts = self.decoderPolicyGradient(features, captions, states, lengths, self.opt.MC_rollouts, MCRollouts=True)
-                    maxSequenceLength = 15
-                    _ = self.decoderPolicyGradient(features, captions, states, maxSequenceLength, lengths, gt=False)
+                    maxSequenceLength = max(lengths)
+                    outputs = self.decoderPolicyGradient(features, captions, states, maxSequenceLength, lengths, gt=False)
+
+                    # Calculate loss for Log Display
+                    loss = self.criterion(outputs.detach(), targets)
 
                     # Monte Carlo Rollouts #1 - Every Rollout shares only one LSTM
                     # Monte Carlo Rollouts #2 - Each Rollout has own LSTM
-                    actions_rollouts = self.decoderPolicyGradient.getMonteCarloRollouts(featuresVolatile, statesVolatile, self.opt.MC_rollouts, maxSequenceLength, gt=False)
-                    predictions      = self.decoderPolicyGradient.getSentences(actions_rollouts, imgids, self.vocab)
+                    actions_rollouts     = self.decoderPolicyGradient.getMonteCarloRollouts(featuresVolatile, statesVolatile, self.opt.MC_rollouts, maxSequenceLength, gt=False)
+                    predictions_rollouts = self.decoderPolicyGradient.getSentences(actions_rollouts, imgids, self.vocab)
 
                     if 0:
                         torch.set_printoptions(edgeitems=100, linewidth=160)
-                        for prediction in predictions:
+                        for prediction in predictions_rollouts:
                             print(prediction)
 
                     # Calculate Rewards - Evaluate COCO Metrics
-                    rewards_rollouts, lang_stat_rollouts = self.decoderPolicyGradient.getRewardsRollouts(predictions, self.opt.MC_rollouts, lengths, maxSequenceLength, self.coco_train, self.valids_train)
+                    rewards_rollouts, lang_stat_rollouts = self.decoderPolicyGradient.getRewardsRollouts(predictions_rollouts, self.opt.MC_rollouts, lengths, maxSequenceLength, self.coco_train, self.valids_train)
 
                     if 1:
                         for idx, lang_stat in enumerate(lang_stat_rollouts):
@@ -307,14 +321,31 @@ class Trainer(object):
 
                     # Display Information :: REINFORCE
                     if iter % self.opt.log_step == 0:
-                        print('[REINFORCE] Epoch [%2d/%2d], Step [%4d/%4d], Rewards[min/avg/max]: [%.4f/%.4f/%.4f], Perplexity: [%6.4f/%6.4f/%6.4f], lr: %1.1e'
-                              % (epoch, self.opt.max_epochs, iter, self.total_train_iter, rewardsMin, rewardsAvg, rewardsMax, np.exp(rewardsMin), np.exp(rewardsAvg), np.exp(rewardsMax), self.opt.current_lr))
-                        log_print = '[REINFORCE] Epoch [%2d/%2d], Step [%4d/%4d], Rewards[min/avg/max]: [%.4f/%.4f/%.4f], Perplexity: [%6.4f/%6.4f/%6.4f], lr: %1.1e' % \
-                                    (epoch, self.opt.max_epochs, iter, self.total_train_iter, rewardsMin, rewardsAvg, rewardsMax, np.exp(rewardsMin), np.exp(rewardsAvg), np.exp(rewardsMax), self.opt.current_lr)
-                        with open('log.txt', 'a') as f:
+                        # Generate a Log String
+                        log_print = '[REINFORCE] Epoch [%2d/%2d], Step [%4d/%4d], Loss: %2.4f, Perplexity: %6.4f, Rewards[min/avg/max]: [%.4f/%.4f/%.4f], Perplexity: [%6.4f/%6.4f/%6.4f], lr: %1.1e' % \
+                                    (epoch, self.opt.max_epochs, iter, self.total_train_iter, loss.data[0], np.exp(loss.data[0]), rewardsMin, rewardsAvg, rewardsMax, np.exp(rewardsMin), np.exp(rewardsAvg), np.exp(rewardsMax),
+                                     self.opt.current_lr)
+                        print(log_print)
+
+                        # Save Log - Generated Sentences
+                        savePath = os.path.join(self.opt.expr_dir, self.opt.exp_id + "_REINFORCE_GeneratedSentences" + ".txt")
+                        with open(savePath, 'a') as f:
                             f.write(log_print)
                             f.write('\n')
-                        with open('log_COCOMetric.txt', 'a') as f:
+                            for prediction in predictions_rollouts:
+                                f.write(prediction)
+                                f.write('\n')
+                            f.write('\n\n')
+
+                        # Save & Print the Log
+                        savePath = os.path.join(self.opt.expr_dir, self.opt.exp_id + "_REINFORCE_log" + ".txt")
+                        with open(savePath, 'a') as f:
+                            f.write(log_print)
+                            f.write('\n')
+
+                        # Save Log - COCO Metric
+                        savePath = os.path.join(self.opt.expr_dir, self.opt.exp_id + "_REINFORCE_COCOMetric" + ".txt")
+                        with open(savePath, 'a') as f:
                             f.write(log_print)
                             f.write('\n')
                             for lang_stat in lang_stat_rollouts:
@@ -323,6 +354,7 @@ class Trainer(object):
                                 f.write(log_print)
                                 f.write('\n')
                             f.write('\n\n')
+
                     # Delete Variables
                     del self.decoderPolicyGradient.outputs[:]
                     del self.decoderPolicyGradient.actions[:]

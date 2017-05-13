@@ -32,6 +32,7 @@ def main(opt):
     print('load the dataset into memory...')
     print('total iterations in training phase : {} \ntotal iterations in validation phase : {}'.format(len(train_dataloader), len(valid_dataloader)))
 
+    save_config(opt)
     trainer = Trainer(opt, train_dataloader, valid_dataloader)
     trainer.train()
     print('done')

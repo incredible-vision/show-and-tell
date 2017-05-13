@@ -2,6 +2,7 @@ import os
 import json
 import pickle
 import argparse
+from datetime import datetime
 
 def parse_opt():
 
@@ -15,7 +16,7 @@ def parse_opt():
     parser.add_argument('--num_gpu',        type=int, default=1,                help='number of gpus available, if set to 0, use cpu instead')
     parser.add_argument('--random_seed',    type=int, default=123,              help='random seed number, to reproduce the result, fix the number')
     parser.add_argument('--crop_size',      type=int, default=224,              help='image crop size, spatial dimension of input to the encoder')
-    parser.add_argument('--batch_size',     type=int, default=128,              help='batch size for training')
+    parser.add_argument('--batch_size',     type=int, default=256,              help='batch size for training')
     # parser.add_argument('--batch_size',     type=int, default=512,              help='batch size for training')
     # parser.add_argument('--batch_size',     type=int, default=2,              help='batch size for training')
     parser.add_argument('--sentence_size',  type=int, default=20,               help='maximum sentence size')
@@ -24,7 +25,7 @@ def parse_opt():
     parser.add_argument('--vocab_path',     type=str, default='data/vocab.pkl', help='vocabulary wrapper')
 
     parser.add_argument('--expr_dir',       type=str, default='experiment',     help='experiment directory')
-    parser.add_argument('--exp_id',         type=int, default=1,                help='experiment id')
+    parser.add_argument('--exp_id',         type=str, default=datetime.today().strftime('%Y%m%d_%H%M%S'), help='experiment id')
     parser.add_argument('--start_from',     type=str, default=None,             help='continue from this configurations')
 
     parser.add_argument('--embed_size',     type=int, default=256,              help='dimension of word embedding vectors')
@@ -35,7 +36,8 @@ def parse_opt():
     parser.add_argument('--load_model_path', type=str,              default=None)
     parser.add_argument('--load_optim_path', type=str,              default=None)
 
-    parser.add_argument('--learning_rate',                      type=float, default=0.001)
+    # parser.add_argument('--learning_rate',                      type=float, default=0.001)
+    parser.add_argument('--learning_rate',                      type=float, default=0.0001)
     parser.add_argument('--max_epochs',                         type=int,   default=20)
     parser.add_argument('--max_epochs_REINFORCE',               type=int,   default=20)
     parser.add_argument('--learning_rate_decay_start',          type=int,   default=1,      help='at what iteration to start decaying learning rate? (-1 = dont) (in epoch)')
@@ -58,7 +60,7 @@ def parse_opt():
 def save_config(opt):
     if not os.path.exists(opt.expr_dir):
         os.makedirs(opt.expr_dir)
-    save_path = os.path.join(opt.expr_dir, "config_expr_"+ str(opt.exp_id)+".pkl")
+    save_path = os.path.join(opt.expr_dir, str(opt.exp_id) + "_config_expr" + ".pkl")
 
     print("[saving config file...], save to %s" % save_path)
 
