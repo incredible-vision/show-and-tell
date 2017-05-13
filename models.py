@@ -6,6 +6,7 @@ import numpy as np
 from torch.nn.utils.rnn import pack_padded_sequence
 from torch.autograd import Variable
 from eval_SPIDEr import language_eval
+import time
 
 class EncoderCNN(nn.Module):
     def __init__(self, embed_size):
@@ -164,11 +165,6 @@ class DecoderPolicyGradient(nn.Module):
                                actions_detached[t].data.repeat(cols-K*(t-1), 1)), 0))
             # Modify Types of Variables
             actions_rollouts = torch.stack(actions_rollouts, 1).squeeze()
-            if 0:
-                torch.set_printoptions(edgeitems=maxlen, linewidth=200)
-                print(actions_rollouts)
-            # Modify Types of Variable
-            actions_rollouts_numpy = actions_rollouts.cpu().numpy()
 
         # Get MC Rollouts with the LSTM generated without Ground Truth
         else:
@@ -203,11 +199,14 @@ class DecoderPolicyGradient(nn.Module):
                         actions_rollouts.append(actions_rollout)
             # Modify Types of Variables
             actions_rollouts = torch.stack(actions_rollouts, 0).squeeze().view(-1, maxlen)
-            if 0:
-                torch.set_printoptions(edgeitems=maxlen, linewidth=200)
-                print(actions_rollouts)
-            # Modify Types of Variable
-            actions_rollouts_numpy = actions_rollouts.cpu().numpy()
+
+        # DEBUG - Display MC Rollouts
+        if 0:
+            torch.set_printoptions(edgeitems=maxlen, linewidth=200)
+            print(actions_rollouts)
+
+        # Modify Types of Variable
+        actions_rollouts_numpy = actions_rollouts.cpu().numpy()
         return actions_rollouts_numpy
 
 
@@ -276,7 +275,7 @@ class DecoderPolicyGradient(nn.Module):
         rewardsMax = torch.max(rewards)
         rewardsMin = torch.min(rewards)
         rewardsAvg = torch.mean(rewards)
-        # rewards = (rewards - rewards.mean()) / (rewards.std() + np.finfo(np.float32).eps)  # baseline
+        rewards = (rewards - rewards.mean()) / (rewards.std() + np.finfo(np.float32).eps)  # baseline
         return rewards, rewardsMax, rewardsMin, rewardsAvg
 
     # Get an Action by using Stochastic Policy

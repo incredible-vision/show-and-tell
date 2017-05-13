@@ -327,21 +327,21 @@ class Trainer(object):
                                      self.opt.current_lr)
                         print(log_print)
 
+                        # Save & Print the Log
+                        savePath = os.path.join(self.opt.expr_dir, self.opt.exp_id + "_REINFORCE_log" + ".txt")
+                        with open(savePath, 'a') as f:
+                            f.write(log_print)
+                            f.write('\n')
+
                         # Save Log - Generated Sentences
                         savePath = os.path.join(self.opt.expr_dir, self.opt.exp_id + "_REINFORCE_GeneratedSentences" + ".txt")
                         with open(savePath, 'a') as f:
                             f.write(log_print)
                             f.write('\n')
                             for prediction in predictions_rollouts:
-                                f.write(prediction)
+                                f.write(prediction['caption'])
                                 f.write('\n')
                             f.write('\n\n')
-
-                        # Save & Print the Log
-                        savePath = os.path.join(self.opt.expr_dir, self.opt.exp_id + "_REINFORCE_log" + ".txt")
-                        with open(savePath, 'a') as f:
-                            f.write(log_print)
-                            f.write('\n')
 
                         # Save Log - COCO Metric
                         savePath = os.path.join(self.opt.expr_dir, self.opt.exp_id + "_REINFORCE_COCOMetric" + ".txt")
@@ -349,9 +349,9 @@ class Trainer(object):
                             f.write(log_print)
                             f.write('\n')
                             for lang_stat in lang_stat_rollouts:
-                                log_print = 'BLEU1: %.4f, BLEU2: %.4f, BLEU3: %.4f, BLEU4: %.4f, CIDER: %.4f, METEOR: %.4f, ROUGE: %.4f'%\
-                                            (lang_stat['Bleu_1'], lang_stat['Bleu_2'], lang_stat['Bleu_3'], lang_stat['Bleu_4'], lang_stat['CIDEr'], lang_stat['METEOR'], lang_stat['ROUGE_L'])
-                                f.write(log_print)
+                                log_print_stat = 'BLEU1: %.4f, BLEU2: %.4f, BLEU3: %.4f, BLEU4: %.4f, CIDER: %.4f, METEOR: %.4f, ROUGE: %.4f'%\
+                                                 (lang_stat['Bleu_1'], lang_stat['Bleu_2'], lang_stat['Bleu_3'], lang_stat['Bleu_4'], lang_stat['CIDEr'], lang_stat['METEOR'], lang_stat['ROUGE_L'])
+                                f.write(log_print_stat)
                                 f.write('\n')
                             f.write('\n\n')
 
