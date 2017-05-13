@@ -46,22 +46,21 @@ class COCOEvalCap:
         # =================================================
         # Compute scores
         # =================================================
-        if 0:
-            if len(res) != 128:
-                print('---------------------------------')
-                print('gts')
-                print(gts)
-                print('')
-                print('---------------------------------')
-                print('res')
-                print(res)
-                print('')
-                print(len(gts), len(res), len(imgIds))
-                for idx in imgIds:
-                    if len(res[idx]) != 1:
-                        tmp = res[idx][0]
-                        res[idx] = []
-                        res[idx].append(tmp)
+        if len(res) != 256:
+            print('---------------------------------')
+            print('gts')
+            print(gts)
+            print('')
+            print('---------------------------------')
+            print('res')
+            print(res)
+            print('')
+            print(len(gts), len(res), len(imgIds))
+            for idx in imgIds:
+                if len(res[idx]) != 1:
+                    tmp = res[idx][0]
+                    res[idx] = []
+                    res[idx].append(tmp)
 
         for scorer, method in scorers:
             # print('computing %s score...'%(scorer.method()))
