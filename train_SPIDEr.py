@@ -95,7 +95,7 @@ class Trainer(object):
                 group['lr'] = lr
 
         # First, Pre-Train the Model using Maximum Likelihood Estimation on Dataset.
-        if 1:
+        if 0:
             # Load the Pre-Trained Models
             print('----------------------------------')
             print('First, Load the Pre-Trained Models')
@@ -119,19 +119,12 @@ class Trainer(object):
                 else:
                     self.opt.current_lr = self.opt.learning_rate
 
-                # Assign the scheduled sampling prob
-                if 0:
-                    if epoch > self.opt.scheduled_sampling_start and self.opt.scheduled_sampling_start >= 0:
-                        fraction = (epoch - self.opt.scheduled_sampling_start) // self.opt.scheduled_sampling_increase_every
-                        self.opt.ss_prob = min(self.opt.scheduled_sampling_increase_prob * fraction, self.opt.scheduled_sampling_max_prob)
-                        self.decoder.ss_prob = self.opt.ss_prob
+                # Set Network model as Training mode
+                self.encoder.train()
+                self.decoderPolicyGradient.train()
 
                 # For each Iteration,
                 for iter, (images, captions, lengths, imgids) in enumerate(self.trainloader):
-
-                    # Set Network model as Training mode
-                    self.encoder.train()
-                    self.decoderPolicyGradient.train()
 
                     # Set mini-batch dataset
                     images   =  Variable(images)
@@ -188,7 +181,13 @@ class Trainer(object):
 
                 # Make evaluation on validation set, and save model
                 val_loss, predictions, lang_stats = evaluationPolicyGradient(self.encoder, self.decoderPolicyGradient, self.criterion, self.validloader, self.vocab, self.opt, self.coco_valid, self.valids_valid)
-                print(lang_stats)
+                # Display & Save Information :: MLE Show and Tell
+                with open(savePath, 'a') as f:
+                    log_print_stat = 'BLEU1: %.4f, BLEU2: %.4f, BLEU3: %.4f, BLEU4: %.4f, CIDER: %.4f, METEOR: %.4f, ROUGE: %.4f' % \
+                                     (lang_stats['Bleu_1'], lang_stats['Bleu_2'], lang_stats['Bleu_3'], lang_stats['Bleu_4'], lang_stats['CIDEr'], lang_stats['METEOR'], lang_stats['ROUGE_L'])
+                    f.write(log_print_stat)
+                    f.write('\n\n')
+                    print(log_print_stat)
 
                 # Save the Pre-trained Model for Every Epoch
                 torch.save(self.encoder.state_dict(),               os.path.join('model/', 'Pre-trained-encoder-epoch%d.pkl'               % (epoch)))
@@ -225,27 +224,12 @@ class Trainer(object):
                 else:
                     self.opt.current_lr = self.opt.learning_rate
 
+                # Set Network model as Training mode
+                self.encoder.train()
+                self.decoderPolicyGradient.train()
+
                 # For each Iteration,
                 for iter, (images, captions, lengths, imgids) in enumerate(self.trainloader):
-
-                    if 0:
-                        if len(imgids) < self.opt.batch_size:
-                            print('Selected Batch size(%d) is not same as batch size' % len(imgids))
-                            print(imgids)
-                            continue
-
-                        if 453611 or 521652 in imgids:
-                            torch.set_printoptions(edgeitems=100, linewidth=160)
-                            print('453611 ERROR')
-                            print('imgids')
-                            print(imgids)
-                            print('captions')
-                            print(captions)
-                            continue
-
-                    # Set Network model as Training mode
-                    self.encoder.train()
-                    self.decoderPolicyGradient.train()
 
                     # Set mini-batch dataset for Policy Gradient
                     imagesVolatile =  Variable(images, volatile=True)
@@ -302,7 +286,7 @@ class Trainer(object):
 
                     if 1:
                         for idx, lang_stat in enumerate(lang_stat_rollouts):
-                            print('Index: %d, BLEU1: %.4f, BLEU2: %.4f, BLEU3: %.4f, BLEU4: %.4f, CIDER: %.4f, METEOR: %.4f, ROUGE: %.4f'%\
+                            print('Rollout index: %3d, BLEU1: %.4f, BLEU2: %.4f, BLEU3: %.4f, BLEU4: %.4f, CIDER: %.4f, METEOR: %.4f, ROUGE: %.4f'%\
                                   (idx, lang_stat['Bleu_1'], lang_stat['Bleu_2'], lang_stat['Bleu_3'], lang_stat['Bleu_4'], lang_stat['CIDEr'], lang_stat['METEOR'], lang_stat['ROUGE_L']))
 
                     # Calculate Rewards
@@ -312,7 +296,6 @@ class Trainer(object):
                     #  -  action: Variable[torch.LongTensor of size 1x1]
                     #  - rewards: [torch.FloatTensor of size 31]
                     #  -       r: float
-                    torch.cuda.synchronize()
                     for action, r in zip(self.decoderPolicyGradient.actions[1:], rewards):
                         action.reinforce(r)
                     autograd.backward(self.decoderPolicyGradient.actions[1:], [None for _ in self.decoderPolicyGradient.actions[1:]])
@@ -348,9 +331,9 @@ class Trainer(object):
                         with open(savePath, 'a') as f:
                             f.write(log_print)
                             f.write('\n')
-                            for lang_stat in lang_stat_rollouts:
-                                log_print_stat = 'BLEU1: %.4f, BLEU2: %.4f, BLEU3: %.4f, BLEU4: %.4f, CIDER: %.4f, METEOR: %.4f, ROUGE: %.4f'%\
-                                                 (lang_stat['Bleu_1'], lang_stat['Bleu_2'], lang_stat['Bleu_3'], lang_stat['Bleu_4'], lang_stat['CIDEr'], lang_stat['METEOR'], lang_stat['ROUGE_L'])
+                            for idx, lang_stat in enumerate(lang_stat_rollouts):
+                                log_print_stat = 'Rollout index: %3d, BLEU1: %.4f, BLEU2: %.4f, BLEU3: %.4f, BLEU4: %.4f, CIDER: %.4f, METEOR: %.4f, ROUGE: %.4f'%\
+                                                 (idx, lang_stat['Bleu_1'], lang_stat['Bleu_2'], lang_stat['Bleu_3'], lang_stat['Bleu_4'], lang_stat['CIDEr'], lang_stat['METEOR'], lang_stat['ROUGE_L'])
                                 f.write(log_print_stat)
                                 f.write('\n')
                             f.write('\n\n')
@@ -388,7 +371,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_step', type=int, default=1000, help='step size for saving trained models')
 
     # Model parameters
-    parser.add_argument('--embed_size', type=int, default=256, help='dimension of word embedding vectors')
+    parser.add_argument('--embed_size', type=int, default=512, help='dimension of word embedding vectors')
     parser.add_argument('--hidden_size', type=int, default=512,help='dimension of lstm hidden states')
     parser.add_argument('--num_layers', type=int, default=1,help='number of layers in lstm')
 

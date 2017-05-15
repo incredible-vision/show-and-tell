@@ -46,6 +46,7 @@ class COCOEvalCap:
         # =================================================
         # Compute scores
         # =================================================
+        # For Batch Error, You need to change batch size on the if statement.
         if len(res) != 256:
             print('---------------------------------')
             print('gts')

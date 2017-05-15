@@ -172,6 +172,8 @@ def evaluationPolicyGradient(encoder, decoderPolicyGradient, crit, loader, vocab
         # Delete Variables
         del decoderPolicyGradient.outputs[:]
         del decoderPolicyGradient.actions[:]
+        del decoderPolicyGradient.inputs[:]
+        del decoderPolicyGradient.states[:]
 
     # Evaluation Generated Sentences
     lang_stats = language_eval(predictions, coco, valids)

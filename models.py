@@ -90,7 +90,6 @@ class DecoderPolicyGradient(nn.Module):
         self.inputs  = []
         self.states  = []
 
-
     def init_weights(self):
         """Initialize weights."""
         self.embed.weight.data.uniform_(-0.1, 0.1)
@@ -216,6 +215,8 @@ class DecoderPolicyGradient(nn.Module):
             output = self.linear(hiddens.squeeze(1))
             # Get a Stochastic Action (Stochastic Policy)
             action = self.getStochasticAction(output)
+            # Get a Deterministic Action (Deterministic Policy)
+            # action = self.getDeterministicAction(output)
             # Set LSTM Input with LSTM Output (Detached!)
             inputs = self.embed(action.detach())
             # Append a Rollout Action to List Variables
@@ -226,7 +227,7 @@ class DecoderPolicyGradient(nn.Module):
         # Initialize List Variables
         predictions = []
         result_sentences = []
-        for sentence_ids in actions_rollouts[:, 1:]:
+        for sentence_ids in actions_rollouts[:, 1:]:  # Without <start>
             sampled_caption = []
             for word_id in sentence_ids:
                 word = vocab.idx2word[word_id]
@@ -248,7 +249,8 @@ class DecoderPolicyGradient(nn.Module):
                 lang_stat = language_eval(predictions[k * len(lengths):(k + 1) * len(lengths)], coco_train, valids_train)  # Batch-Based
                 BCMR = + 0.5 * lang_stat['Bleu_1'] + 0.5 * lang_stat['Bleu_2'] \
                        + 1.0 * lang_stat['Bleu_3'] + 1.0 * lang_stat['Bleu_4'] \
-                       + 1.0 * lang_stat['CIDEr'] + 5.0 * lang_stat['METEOR'] + 2.0 * lang_stat['ROUGE_L']
+                       + 1.0 * lang_stat['CIDEr']  + 5.0 * lang_stat['METEOR'] \
+                       + 2.0 * lang_stat['ROUGE_L']
             else:
                 BCMR = 1
                 lang_stat = {}
@@ -289,7 +291,7 @@ class DecoderPolicyGradient(nn.Module):
     # Get an Action by using Deterministic Policy
     def getDeterministicAction(self, output):
         distribution = nn.functional.softmax(output)
-        action = distribution.max(1)[1].squeeze()
+        action = distribution.max(1)[1]
         return action
 
 

@@ -28,7 +28,7 @@ def parse_opt():
     parser.add_argument('--exp_id',         type=str, default=datetime.today().strftime('%Y%m%d_%H%M%S'), help='experiment id')
     parser.add_argument('--start_from',     type=str, default=None,             help='continue from this configurations')
 
-    parser.add_argument('--embed_size',     type=int, default=256,              help='dimension of word embedding vectors')
+    parser.add_argument('--embed_size',     type=int, default=512,              help='dimension of word embedding vectors')
     parser.add_argument('--hidden_size',    type=int, default=512,              help='dimension of lstm hidden states')
     parser.add_argument('--num_layers',     type=int, default=1,                help='number of layers in lstm')
 
@@ -37,7 +37,7 @@ def parse_opt():
     parser.add_argument('--load_optim_path', type=str,              default=None)
 
     # parser.add_argument('--learning_rate',                      type=float, default=0.001)
-    parser.add_argument('--learning_rate',                      type=float, default=0.0001)
+    parser.add_argument('--learning_rate',                      type=float, default=0.001)
     parser.add_argument('--max_epochs',                         type=int,   default=20)
     parser.add_argument('--max_epochs_REINFORCE',               type=int,   default=20)
     parser.add_argument('--learning_rate_decay_start',          type=int,   default=1,      help='at what iteration to start decaying learning rate? (-1 = dont) (in epoch)')
