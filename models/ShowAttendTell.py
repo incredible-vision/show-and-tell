@@ -28,7 +28,6 @@ class ShowAttendTellModel(nn.Module):
         """ define decoder, use lstm cell for reproducing """
         self.embedding = nn.Embedding(vocab_size, embed_size)
         self.lstmcell = nn.LSTMCell(hidden_size , hidden_size)
-        self.dropout_decoder = nn.Dropout(p=0.5)
 
         """ define classifier """
         self.context2out= nn.Linear(context_size, embed_size)
@@ -60,7 +59,6 @@ class ShowAttendTellModel(nn.Module):
             rnn_input = torch.cat([embedding, context], dim=1)
             hidden, c = self.lstmcell(rnn_input, (hidden[:batch_size], c[:batch_size]))
             output = self.output_layer(context, hidden)
-            output = self.dropout_decoder(output)
             alpha_list.append(alpha)
             hiddens.append(hidden)
             outputs.append(output)

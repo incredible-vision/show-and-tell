@@ -95,7 +95,7 @@ def evaluation(model, crit, loader, vocab, opt):
         loss_sum = loss_sum + loss
         loss_evals = loss_evals + 1
 
-        sampled_ids = model.sample(images, state)
+        sampled_ids = model.sample(images)
 
         sampled_ids = sampled_ids.cpu().data.numpy()
         result_sentences = []

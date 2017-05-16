@@ -8,15 +8,13 @@ import pickle
 import json
 from data_loader import get_loader
 from utils import Vocabulary
-from models import ShowTellModel
-from model import ShowAttendTellModel
+from model2 import ShowAttendTellModel
 from generator import GeneratorModel
 from torch.autograd import Variable
 import torch.optim as optim
 from torch.nn.utils.rnn import pack_padded_sequence
 from torchvision import transforms
 from eval import evaluation
-
 
 class Trainer(object):
     def __init__(self, opt, trainloader, validloader):
@@ -35,8 +33,9 @@ class Trainer(object):
         with open(opt.vocab_path, 'rb') as f:
             self.vocab = pickle.load(f)
 
+        self.model = ShowAttendTellModel(opt.hidden_size, opt.embed_size, len(self.vocab), opt.embed_size, opt)
         # self.model = GeneratorModel(opt.hidden_size, opt.embed_size, len(self.vocab), opt.embed_size, opt)
-        self.model = ShowTellModel(opt.embed_size, opt.hidden_size, len(self.vocab), 1)
+        # self.model = ShowTellModel(opt.embed_size, opt.hidden_size, len(self.vocab), 1)
 
         if self.num_gpu == 1:
             self.model.cuda()
