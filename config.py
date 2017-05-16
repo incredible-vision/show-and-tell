@@ -14,7 +14,7 @@ def parse_opt():
     parser.add_argument('--num_gpu', type=int, default=1, help='number of gpus available, if set to 0, use cpu instead')
     parser.add_argument('--random_seed', type=int, default=1234, help='random seed number, to reproduce the result, fix the number')
     parser.add_argument('--crop_size', type=int, default=224, help='image crop size, spatial dimension of input to the encoder')
-    parser.add_argument('--batch_size', type=int, default=2, help='batch size for training')
+    parser.add_argument('--batch_size', type=int, default=128, help='batch size for training')
 
     parser.add_argument('--vocab_path', type=str, default='data/vocab.pkl', help='vocabulary wrapper')
 
@@ -30,9 +30,11 @@ def parse_opt():
     parser.add_argument('--load_best_score', action="store_true", default=True)
     parser.add_argument('--load_model_path', type=str, default=None)
     parser.add_argument('--load_optim_path', type=str, default=None)
+    parser.add_argument('--load_pretrained', action='store_false', default=False)
 
     parser.add_argument('--learning_rate', type=float, default=0.001)
-    parser.add_argument('--max_epochs', type=int, default=10)
+    parser.add_argument('--max_epochs', type=int, default=20)
+
     parser.add_argument('--learning_rate_decay_start', type=int, default=1,
                         help='at what iteration to start decaying learning rate? (-1 = dont) (in epoch)')
     parser.add_argument('--learning_rate_decay_every', type=int, default=3,
@@ -52,7 +54,8 @@ def parse_opt():
                         help='Maximum scheduled sampling prob.')
 
     parser.add_argument('--log_step', type=int, default=10, help='step size for printing log info')
-    parser.add_argument('--save_checkpoint_every', type=int, default=10,
+    parser.add_argument('--language_eval', type=int, default=0, help='1 for Cider score, 0 for log loss')
+    parser.add_argument('--save_checkpoint_every', type=int, default=3236,
                         help='how often to save a model checkpoint (in iterations)?')
 
 

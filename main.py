@@ -6,7 +6,7 @@ from torchvision import transforms
 from data_loader import get_loader
 from utils import Vocabulary
 from config import parse_opt, save_config
-from train import Trainer
+from train import Trainer, Trainer_PG
 from utils import setup_logging
 import logging
 
@@ -43,6 +43,7 @@ def main(opt):
     print('total iterations in training phase : {} \ntotal iterations in validation phase : {}'.format(len(train_dataloader), len(valid_dataloader)))
 
     trainer = Trainer(opt, train_dataloader, valid_dataloader)
+    #trainer = Trainer_PG(opt, train_dataloader, valid_dataloader)
     trainer.train()
     print('done')
 
