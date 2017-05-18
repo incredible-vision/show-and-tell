@@ -44,7 +44,6 @@ class ShowAttendTellModel(nn.Module):
             alpha_list.append(alpha)
             h, c = self.lstmcell()
 
-
         print(len(features))
         return features
 
