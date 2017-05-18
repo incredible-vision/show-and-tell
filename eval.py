@@ -52,16 +52,16 @@ def language_eval(preds):
     return out
 
 def evaluation(model, crit, loader, vocab, opt):
-    verbose = True
-    val_images_use = -1
-    lang_eval = 1
 
     model.eval()
 
     loss_sum = 0
     loss_evals = 0
     predictions = []
+
     check_duplicate = []
+    caption_vis = True
+
 
     for iter, (images, captions, lengths, imgids) in enumerate(loader):
         torch.cuda.synchronize()
@@ -70,13 +70,15 @@ def evaluation(model, crit, loader, vocab, opt):
         # Set mini-batch dataset
         images = Variable(images, volatile=True)
         captions = Variable(captions, volatile=True)
-        state = (Variable(torch.zeros(images.size(0), opt.hidden_size), volatile=True),
-                 Variable(torch.zeros(images.size(0), opt.hidden_size), volatile=True))
+
+        state = (Variable(torch.zeros(opt.num_layers, images.size(0), opt.hidden_size), volatile=True),
+                 Variable(torch.zeros(opt.num_layers, images.size(0), opt.hidden_size), volatile=True))
+
 
         if opt.num_gpu > 0:
             images = images.cuda()
             captions = captions.cuda()
-            state = torch.stack([s.cuda() for s in state])
+            state = [s.cuda() for s in state]
 
         targets = pack_padded_sequence(captions, lengths, batch_first=True)[0]
 
@@ -87,9 +89,9 @@ def evaluation(model, crit, loader, vocab, opt):
         loss_evals = loss_evals + 1
 
         sampled_ids = model.sample(images)
+
         sampled_ids = sampled_ids.cpu().data.numpy()
         result_sentences = []
-
         for sentence_ids in sampled_ids:
             sampled_caption = []
             for word_id in sentence_ids:
@@ -107,6 +109,10 @@ def evaluation(model, crit, loader, vocab, opt):
             entry = {'image_id': imgids[i], 'caption': sentence}
             predictions.append(entry)
 
+    if caption_vis:
+        for ent in predictions[:10]:
+            print("%s : %s" % (ent['image_id'], ent['caption']))
+
     lang_stats = language_eval(predictions)
 
-    return loss_sum / loss_evals, predictions, lang_stats
+    return loss_sum/loss_evals, predictions, lang_stats

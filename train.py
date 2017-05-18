@@ -20,7 +20,7 @@ from utils import Vocabulary
 
 from eval_SPIDEr import evaluationPolicyGradient, language_eval
 
-from models import EncoderCNN, DecoderRNN, DecoderPolicyGradient
+from models1 import EncoderCNN, DecoderRNN, DecoderPolicyGradient
 from models2 import ShowAttendTellModel_XE#, ShowAttendTellModel_PG
 
 
@@ -206,7 +206,6 @@ class Trainer(object):
                         print("model saved to {}".format(self.opt.expr_dir))
                         with open(os.path.join(self.opt.expr_dir, 'infos' + '-best.pkl'), 'wb') as f:
                             pickle.dump(infos, f)
-
 
 # Improved Image Captioning via Policy Gradient Optimization of SPIDEr (REINFORCE by SE)
 class Trainer_PG(object):
@@ -504,6 +503,209 @@ class Trainer_PG(object):
                 # Save the Pre-trained Model for Every Epoch
                 torch.save(self.encoder.state_dict(),               os.path.join('models/', 'REINFORCE-encoder-epoch%d.pkl'               % (epoch)))
                 torch.save(self.decoderPolicyGradient.state_dict(), os.path.join('models/', 'REINFORCE-decoderPolicyGradient-epoch%d.pkl' % (epoch)))
+
+
+class Trainer_GAN(object):
+    def __init__(self, opt, trainloader, validloader):
+        self.opt = opt
+
+        self.total_train_iter = len(trainloader)
+        self.total_valid_iter = len(validloader)
+
+        self.trainloader = trainloader
+        self.validloader = validloader
+
+        self.num_gpu = opt.num_gpu
+        self.load_model_path = opt.load_model_path
+        self.load_optimizer_path = opt.load_optim_path
+
+        with open(opt.vocab_path, 'rb') as f:
+            self.vocab = pickle.load(f)
+
+        self.model_G = ShowAttendTellModel_G(opt.hidden_size, opt.embed_size, len(self.vocab), opt.embed_size, opt)
+        self.model_D = ShowAttendTellModel_D(opt.hidden_size, opt.embed_size, len(self.vocab), opt.embed_size, opt)
+
+        if self.num_gpu == 1:
+            self.model.cuda()
+
+        elif self.num_gpu > 1:
+            self.model = nn.DataParallel(self.model.cuda(), device_ids=range(self.num_gpu))
+
+        if self.opt.load_pretrained:
+            if self.load_model_path:
+                self.load_model()
+                print('pretrained model loaded')
+
+            if self.load_optimizer_path:
+                self.load_optimizer()
+
+        """ This criterion combines LogSoftMax and NLLLoss in one single class """
+        self.criterion = nn.CrossEntropyLoss()
+
+        """ only update trainable parameters """
+        parameters = filter(lambda p: p.requires_grad, self.model.parameters())
+        self.optimizer = optim.Adam(parameters, lr=opt.learning_rate)
+
+        print('done')
+
+    def load_model(self):
+        return self.model.load_state_dict(torch.load(os.path.join(self.opt.expr_dir, 'model-best.pth')))
+
+    def load_optimizer(self):
+        return self.optimizer.load_state_dict(torch.load(os.path.join(self.opt.expr_dir, 'optimizer.pth')))
+
+    def train(self):
+
+        infos = {}
+
+        if self.opt.start_from is not None and not self.opt.load_pretrained:
+            # open old infos and check if models are compatible
+            with open(os.path.join(self.opt.expr_dir, 'infos' + '.pkl')) as f:
+                infos = pickle.load(f)
+
+        total_iteration = infos.get('total_iter', 0)
+        loaded_iteration = infos.get('iter', 0)
+        loaded_epoch = infos.get('epoch', 1)
+        val_result_history = infos.get('val_result_history', {})
+        loss_history = infos.get('loss_history', {})
+        lr_history = infos.get('lr_history', {})
+
+        # loading a best validation score
+        if self.opt.load_best_score == True:
+            best_val_score = infos.get('best_val_score', None)
+
+        def clip_gradient(optimizer, grad_clip):
+            for group in optimizer.param_groups:
+                for param in group['params']:
+                    param.grad.data.clamp_(-grad_clip, grad_clip)
+
+        def set_lr(optimizer, lr):
+            for group in optimizer.param_groups:
+                group['lr'] = lr
+
+
+        for epoch in range(1, 1 + self.opt.max_epochs):
+
+            if epoch > self.opt.learning_rate_decay_start and self.opt.learning_rate_decay_start >= 1:
+                fraction = (epoch - self.opt.learning_rate_decay_start) // self.opt.learning_rate_decay_every
+                decay_factor = self.opt.learning_rate_decay_rate ** fraction
+                self.opt.current_lr = self.opt.learning_rate * decay_factor
+                set_lr(self.optimizer, self.opt.current_lr)
+            else:
+                self.opt.current_lr = self.opt.learning_rate
+
+            if epoch < loaded_epoch: continue
+
+            for iter, (images, captions, lengths, imgids) in enumerate(self.trainloader):
+
+                iter += 1
+                total_iteration += 1
+                if iter <= loaded_iteration: continue
+
+                torch.cuda.synchronize()
+
+                # Set mini-batch dataset
+                images = Variable(images).cuda()
+                captions = Variable(captions).cuda()
+
+                lengths = [l-1 for l in lengths]
+                targets = pack_padded_sequence(captions[:,1:], lengths, batch_first=True)[0]
+
+                ############################
+                # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
+                ###########################
+                self.model_D.zero_grad()
+                f_sentences = self.model_G.sample(images)
+                r_sentences = self.gt_sentences(targets)
+
+                f_label, r_label = Variable(torch.FloatTensor(self.opt.batch_size).cuda()), Variable(torch.FloatTensor(self.opt.batch_size).cuda())
+                f_label.data.resize_(self.opt.batch_size).fill(0)
+                r_label.data.resize_(self.opt.batch_size).fill(1)
+
+                f_output = self.model_D(f_sentences)
+                f_error = self.criterion(f_output.detach(), f_label)
+                f_error.backward()
+
+                r_output = self.model_D(r_sentences)
+                r_error = self.criterion(r_output.detach(), r_label)
+                r_error.backward()
+
+                error_sum = f_error + r_error
+                self.D_optimizer.step()
+
+                ############################
+                # (2) Update G network: maximize log(D(G(z)))
+                ###########################
+
+                self.model_G.zero_grad()
+
+                f_sentences = self.model_G.sample(images, captions[:,:-1], lengths)
+                error = self.model_D(f_sentences)
+
+
+                # Forward, Backward and Optimize
+                self.model.zero_grad()
+                outputs = self.model_G(images, captions[:,:-1], lengths)
+                loss = self.criterion(outputs, targets)
+                loss.backward()
+                clip_gradient(self.optimizer, self.opt.grad_clip)
+                self.optimizer.step()
+
+
+                torch.cuda.synchronize()
+
+                if iter % self.opt.log_step == 0:
+                    print('Epoch [%d/%d], Step [%d/%d], Loss: %.4f, Perplexity: %5.4f'
+                          % (epoch, self.opt.max_epochs, iter, self.total_train_iter,
+                             loss.data[0], np.exp(loss.data[0])))
+
+                # make evaluation on validation set, and save model
+                if (total_iteration % self.opt.save_checkpoint_every == 0):
+                    val_loss, predictions, lang_stats = evaluation(self.model, self.criterion,
+                                                                   self.validloader, self.vocab, self.opt)
+                    val_result_history[total_iteration] = {'loss': val_loss, 'lang_stats': lang_stats,
+                                                           'predictions': predictions}
+
+                    # Write the training loss summary
+                    # loss_history[total_iteration] = loss.data[0].cpu().numpy()[0]
+                    loss_history[total_iteration] = loss.data[0]
+                    lr_history[total_iteration] = self.opt.current_lr
+
+                    # Save model if is improving on validation result
+                    if self.opt.language_eval == 1:
+                        current_score = lang_stats['CIDEr']
+                    else:
+                        current_score = - val_loss
+
+                    best_flag = False
+                    if best_val_score is None or current_score > best_val_score:
+                        best_val_score = current_score
+                        best_flag = True
+
+                    checkpoint_path = os.path.join(self.opt.expr_dir, 'model.pth')
+                    torch.save(self.model.state_dict(), checkpoint_path)
+                    print("model saved to {}".format(checkpoint_path))
+                    optimizer_path = os.path.join(self.opt.expr_dir, 'optimizer.pth')
+                    torch.save(self.optimizer.state_dict(), optimizer_path)
+
+                    # Dump miscalleous informations
+                    infos['total_iter'] = total_iteration
+                    infos['iter'] = iter
+                    infos['epoch'] = epoch
+                    infos['best_val_score'] = best_val_score
+                    infos['opt'] = self.opt
+                    infos['val_result_history'] = val_result_history
+                    infos['loss_history'] = loss_history
+                    infos['lr_history'] = lr_history
+                    with open(os.path.join(self.opt.expr_dir, 'infos' + '.pkl'), 'wb') as f:
+                        pickle.dump(infos, f)
+
+                    if best_flag:
+                        checkpoint_path = os.path.join(self.opt.expr_dir, 'model-best.pth')
+                        torch.save(self.model.state_dict(), checkpoint_path)
+                        print("model saved to {}".format(self.opt.expr_dir))
+                        with open(os.path.join(self.opt.expr_dir, 'infos' + '-best.pkl'), 'wb') as f:
+                            pickle.dump(infos, f)
 
 
 if __name__ == '__main__':
