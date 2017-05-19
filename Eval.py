@@ -17,7 +17,7 @@ from torch.nn.utils.rnn import pack_padded_sequence
 def language_eval(preds):
     import sys
     sys.path.append("coco-caption")
-    annFile = '/home/son/PycharmProjects/show-and-tell/COCO/annotations/captions_val2014.json'
+    annFile = '/home/myunggi/Repository/Data/COCO/annotations_captions/captions_val2014.json'
 
     from pycocotools.coco import COCO
     from pycocoevalcap.eval import COCOEvalCap
@@ -33,6 +33,13 @@ def language_eval(preds):
     # filter results to only those in MSCOCO validation set (will be about a third)
     preds_filt = [p for p in preds if p['image_id'] in valids]
     print('using %d/%d predictions' % (len(preds_filt), len(preds)))
+
+    if not os.path.exists('cache'):
+        os.makedirs('cache')
+
+    with open('cache/'+tmp_name+'.json', 'w') as f:
+        json.dump(preds_filt, f)
+
     json.dump(preds_filt, open('cache/'+tmp_name+'.json', 'w'))
 
     resFile = 'cache/'+tmp_name+'.json'
@@ -52,16 +59,20 @@ def language_eval(preds):
     return out
 
 def evaluation(model, crit, loader, vocab, opt):
-    verbose = True
-    val_images_use = -1
-    lang_eval = 1
 
     model.eval()
 
     loss_sum = 0
     loss_evals = 0
     predictions = []
+
     check_duplicate = []
+    caption_vis = True
+
+    def convertOutputVariable(outputs, maxlen, lengths):
+        outputs = torch.cat(outputs, 1).view(len(lengths), maxlen, -1)
+        outputs = pack_padded_sequence(outputs, lengths, batch_first=True)[0]
+        return outputs
 
     for iter, (images, captions, lengths, imgids) in enumerate(loader):
         torch.cuda.synchronize()
@@ -70,23 +81,27 @@ def evaluation(model, crit, loader, vocab, opt):
         # Set mini-batch dataset
         images = Variable(images, volatile=True)
         captions = Variable(captions, volatile=True)
-        state = (Variable(torch.zeros(images.size(0), opt.hidden_size), volatile=True),
-                 Variable(torch.zeros(images.size(0), opt.hidden_size), volatile=True))
+
+        state = (Variable(torch.zeros(opt.num_layers, images.size(0), opt.hidden_size), volatile=True),
+                 Variable(torch.zeros(opt.num_layers, images.size(0), opt.hidden_size), volatile=True))
+
 
         if opt.num_gpu > 0:
             images = images.cuda()
             captions = captions.cuda()
-            state = torch.stack([s.cuda() for s in state])
+            state = [s.cuda() for s in state]
 
         targets = pack_padded_sequence(captions, lengths, batch_first=True)[0]
 
-        outputs = model(images, captions, lengths)
+        outputs, seqlen = model(images, captions)
+        outputs = convertOutputVariable(outputs, seqlen, lengths)
 
         loss = crit(outputs, targets)
         loss_sum = loss_sum + loss
         loss_evals = loss_evals + 1
 
-        sampled_ids = model.sample(images, state)
+        sampled_ids = model.sample(images)
+
         sampled_ids = sampled_ids.cpu().data.numpy()
         result_sentences = []
         for sentence_ids in sampled_ids:
@@ -105,6 +120,10 @@ def evaluation(model, crit, loader, vocab, opt):
                 check_duplicate.append(imgids[i])
             entry = {'image_id': imgids[i], 'caption': sentence}
             predictions.append(entry)
+
+    if caption_vis:
+        for ent in predictions[:10]:
+            print("%s : %s" % (ent['image_id'], ent['caption']))
 
     lang_stats = language_eval(predictions)
 

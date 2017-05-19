@@ -3,12 +3,14 @@ import json
 import pickle
 import torch
 from torchvision import transforms
-from data_loader import get_loader
-from utils import Vocabulary
-from config import parse_opt, save_config
-from train import Trainer
-from utils import setup_logging
+from DataLoader import get_loader
+from Utils import Vocabulary
+from Config import parse_opt, save_config
+from Train import Trainer
+from Utils import setup_logging
 import logging
+import subprocess
+
 
 def main(opt):
 
@@ -41,14 +43,18 @@ def main(opt):
     print('load the dataset into memory...')
     print('total iterations in training phase : {} \ntotal iterations in validation phase : {}'.format(len(train_dataloader), len(valid_dataloader)))
 
+    if True:
+        vis_cmd = 'python ./visualizer/server.py'
+
+
     trainer = Trainer(opt, train_dataloader, valid_dataloader)
     trainer.train()
     print('done')
 
 
-
 if __name__ == "__main__":
     args = parse_opt()
+
     setup_logging(os.path.join('log.txt'))
     logging.info("\nrun arguments: %s", json.dumps(vars(args), indent=4, sort_keys=True))
 

@@ -7,7 +7,7 @@ import pickle
 import argparse
 from PIL import Image
 import numpy as np
-from utils import Vocabulary
+from Utils import Vocabulary
 
 class CocoDataset(data.Dataset):
 
@@ -56,11 +56,9 @@ def collate_fn(data):
     # merge captions (from tuple of 1D tensor to 2D tensor).
     lengths = [len(cap) for cap in captions]
     targets = torch.zeros(len(captions), max(lengths)).long()
-    target_masks = torch.zeros(len(captions), max(lengths)).long()
     for i, cap in enumerate(captions):
         end = lengths[i]
         targets[i, :end] = cap[:end]
-        target_masks[i, :end] = 1
     return images, targets, lengths, imgids
 
 def get_loader(opt, mode='train', shuffle=True, num_workers=1, transform=None):
@@ -99,6 +97,6 @@ if __name__ == "__main__":
 
     data_loader = get_loader(args, transform=transform)
     total_iter = len(data_loader)
-    for i, (img, target, length, imgids) in enumerate(data_loader):
+    for i, (img, target, length) in enumerate(data_loader):
 
         print('done')
