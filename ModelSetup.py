@@ -12,16 +12,28 @@ import torch.nn as nn
 from models.ShowTellModel import ShowTellModel
 from models.ShowAttendTellModel import ShowAttendTellModel
 
+from models.models1 import EncoderCNN, DecoderRNN, DecoderPolicyGradient
+from models.models2 import ShowAttendTellModel_XE #, ShowAttendTellModel_PG
+from models.models2 import ShowAttendTellModel_G, ShowAttendTellModel_D
+
+
 def model_setup(opt, model_name):
 
     if model_name == 'show_tell':
         opt.load_pretrain = False
         opt.start_from = False
         model = ShowTellModel(opt)
+
     elif model_name == 'show_attend_tell':
         opt.load_pretrain = False
         opt.start_from = False
         model = ShowAttendTellModel(opt)
+
+    elif model_name == 'ShowAttendTellModel_XE':
+        opt.load_pretrain = False
+        opt.start_from = False
+        model = ShowAttendTellModel_XE(opt)
+
     else:
         raise Exception("Caption model not supported: {}".format(opt.model_name))
 

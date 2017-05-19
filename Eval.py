@@ -17,7 +17,7 @@ from torch.nn.utils.rnn import pack_padded_sequence
 def language_eval(preds):
     import sys
     sys.path.append("coco-caption")
-    annFile = '/home/myunggi/Repository/Data/COCO/annotations_captions/captions_val2014.json'
+    annFile = '/home/gt/D_Data/COCO/annotations_captions/captions_val2014.json'
 
     from pycocotools.coco import COCO
     from pycocoevalcap.eval import COCOEvalCap

@@ -6,7 +6,7 @@ from torchvision import transforms
 from DataLoader import get_loader
 from Utils import Vocabulary
 from Config import parse_opt, save_config
-from Train import Trainer
+from Train import Trainer, Trainer_PG, Trainer_GAN
 from Utils import setup_logging
 import logging
 import subprocess
@@ -43,11 +43,10 @@ def main(opt):
     print('load the dataset into memory...')
     print('total iterations in training phase : {} \ntotal iterations in validation phase : {}'.format(len(train_dataloader), len(valid_dataloader)))
 
-    if True:
-        vis_cmd = 'python ./visualizer/server.py'
-
-
     trainer = Trainer(opt, train_dataloader, valid_dataloader)
+    #trainer = Trainer_PG(opt, train_dataloader, valid_dataloader)
+    #trainer = Trainer_GAN(opt, train_dataloader, valid_dataloader)
+
     trainer.train()
     print('done')
 

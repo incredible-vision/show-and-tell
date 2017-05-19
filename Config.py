@@ -8,18 +8,18 @@ def parse_opt():
     parser = argparse.ArgumentParser()
 
     # Data input settings
-    parser.add_argument('--root_dir', type=str, default='/home/myunggi/Research/CapGAN', help="root directory")
+    parser.add_argument('--root_dir', type=str, default='/home/gt/PycharmProjects/show-and-tell', help="root directory")
     parser.add_argument('--data_json', type=str, default='data/data.json', help='input data list which includes captions and image information')
     parser.add_argument('--vocab_path', type=str, default='data/vocab.pkl', help='vocabulary wrapper')
 
     parser.add_argument('--num_gpu', type=int, default=1, help='number of gpus available, if set to 0, use cpu instead')
     parser.add_argument('--random_seed', type=int, default=123, help='random seed number, to reproduce the result, fix the number')
     parser.add_argument('--crop_size', type=int, default=224, help='image crop size, spatial dimension of input to the encoder')
-    parser.add_argument('--batch_size', type=int, default=128, help='batch size for training')
+    parser.add_argument('--batch_size', type=int, default=2, help='batch size for training')
 
     parser.add_argument('--expr_dir', type=str, default='experiment', help='experiment directory')
-    parser.add_argument('--exp_id', type=str, default='showattendtell', help='experiment id')
-    parser.add_argument('--user_id', type=str, default='myunggi', help='user id')
+    parser.add_argument('--exp_id', type=str, default='withGAN', help='experiment id')
+    parser.add_argument('--user_id', type=str, default='gt', help='user id')
     parser.add_argument('--start_from', type=str, default=None, help='continue from this configurations')
 
     parser.add_argument('--embed_size', type=int, default=512, help='dimension of word embedding vectors')
@@ -33,7 +33,7 @@ def parse_opt():
     parser.add_argument('--load_pretrained', action='store_false', default=False)
 
     parser.add_argument('--learning_rate', type=float, default=5e-4)
-    parser.add_argument('--max_epochs', type=int, default=120)
+    parser.add_argument('--max_epochs', type=int, default=100)
 
     parser.add_argument('--learning_rate_decay_start', type=int, default=1, help='at what iteration to start decaying learning rate? (-1 = dont) (in epoch)')
     parser.add_argument('--learning_rate_decay_every', type=int, default=3, help='every how many iterations thereafter to drop LR?(in epoch)')
@@ -46,9 +46,7 @@ def parse_opt():
     parser.add_argument('--scheduled_sampling_max_prob', type=float, default=0.25, help='Maximum scheduled sampling prob.')
 
     parser.add_argument('--log_step', type=int, default=10, help='step size for prining log info')
-
     parser.add_argument('--language_eval', type=int, default=1, help='1 for Cider score, 0 for log loss')
-
     parser.add_argument('--save_checkpoint_every', type=int, default=3236, help='how often to save a model checkpoint (in iterations)?')
 
     args = parser.parse_args()

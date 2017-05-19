@@ -87,7 +87,7 @@ class ShowAttendTellModel(nn.Module):
             outputs.append(output)
 
         # outputs = torch.cat(outputs, 0)
-        return outputs, seqlen
+        return outputs
 
     def sample(self, images, maxlen=20):
 
