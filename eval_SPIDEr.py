@@ -15,7 +15,7 @@ import torch
 from torch.autograd import Variable
 from torch.nn.utils.rnn import pack_padded_sequence
 
-def language_eval(preds, coco, valids):
+def language_eval(preds, coco, valids, NEval, batch_size):
 
     from pycocotools.coco import COCO
     from pycocoevalcap.eval import COCOEvalCap
@@ -33,7 +33,7 @@ def language_eval(preds, coco, valids):
     cocoRes = coco.loadRes(resFile)
     cocoEval = COCOEvalCap(coco, cocoRes)
     cocoEval.params['image_id'] = cocoRes.getImgIds()
-    cocoEval.evaluate()
+    cocoEval.evaluate(NEval, batch_size)
 
     # delete the temp file
     os.system('rm ' +'cache/'+tmp_name+'.json')
@@ -107,7 +107,7 @@ def evaluation(encoder, decoder, crit, loader, vocab, opt, coco, valids):
     return loss_sum/loss_evals, predictions, lang_stats
 
 
-def evaluationPolicyGradient(encoder, decoderPolicyGradient, crit, loader, vocab, opt, coco, valids):
+def evaluationPolicyGradient(encoder, decoderPolicyGradient, crit, loader, vocab, opt, coco, valids, batch_size):
 
     # Set Network Model as Evaluation Mode
     encoder.eval()
@@ -170,12 +170,16 @@ def evaluationPolicyGradient(encoder, decoderPolicyGradient, crit, loader, vocab
             predictions.append(entry)
 
         # Delete Variables
-        del decoderPolicyGradient.outputs[:]
-        del decoderPolicyGradient.actions[:]
-        del decoderPolicyGradient.inputs[:]
-        del decoderPolicyGradient.states[:]
+        decoderPolicyGradient.deleteVariables()
+        if 0:
+            del decoderPolicyGradient.values[:]
+            del decoderPolicyGradient.outputs[:]
+            del decoderPolicyGradient.actions[:]
+            del decoderPolicyGradient.inputs[:]
+            del decoderPolicyGradient.states[:]
 
     # Evaluation Generated Sentences
-    lang_stats = language_eval(predictions, coco, valids)
+    NEval = len(predictions)
+    lang_stats = language_eval(predictions, coco, valids, NEval, batch_size)
 
     return loss_sum / loss_evals, predictions, lang_stats

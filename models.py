@@ -6,6 +6,7 @@ import numpy as np
 from torch.nn.utils.rnn import pack_padded_sequence
 from torch.autograd import Variable
 from eval_SPIDEr import language_eval
+import os
 import time
 
 class EncoderCNN(nn.Module):
@@ -69,7 +70,6 @@ class DecoderRNN(nn.Module):
         sampled_ids = torch.cat(sampled_ids, 1)  # (batch_size, 20)
         return sampled_ids.squeeze()
 
-
 #  3.3 Encoder-decoder architecture
 #   - Each symbol in the vocabulary is embedded as a 512 dimensional word embedding vector.
 #   - Each image is encoded by Inception-V3 as a dense feature vector of dimension 2048 -> 512 dimension with a linear layer and used as the initial state of RNN decoder.
@@ -79,12 +79,21 @@ class DecoderPolicyGradient(nn.Module):
     def __init__(self, embed_size, hidden_size, vocab_size, num_layers):
         """Set the hyper-parameters and build the layers."""
         super(DecoderPolicyGradient, self).__init__()
-        self.embed = nn.Embedding(vocab_size, embed_size)  # vocab_size: 10372, embed_size: 256
+        self.embed = nn.Embedding(vocab_size, embed_size)  # vocab_size: 10372, embed_size: 512
         self.lstm = nn.LSTM(embed_size, hidden_size, num_layers, batch_first=True)
         self.linear = nn.Linear(hidden_size, vocab_size)  # hidden_size: 512, vocab_size: 10372
+        # self.dropOut = nn.Dropout(p=0.5)
+
+        # Baseline Estimator ---------------------------------------
+        self.critic_linear = nn.Linear(hidden_size, 1)
+        # ----------------------------------------------------------
+
         self.ss_prob = 0
         self.init_weights()
 
+        # Baseline Estimator ---------------------------------------
+        self.values  = []
+        # ----------------------------------------------------------
         self.outputs = []
         self.actions = []
         self.inputs  = []
@@ -95,7 +104,24 @@ class DecoderPolicyGradient(nn.Module):
         self.embed.weight.data.uniform_(-0.1, 0.1)
         self.linear.weight.data.uniform_(-0.1, 0.1)
         self.linear.bias.data.fill_(0)
+        # Baseline Estimator ---------------------------------------
+        self.critic_linear.weight.data = self.normalized_columns_initializer(self.critic_linear.weight.data, 1.0)
+        self.critic_linear.bias.data.fill_(0)
+        # ----------------------------------------------------------
 
+    # Baseline Estimator -------------------------------------------
+    def normalized_columns_initializer(self, weights, std=1.0):
+        out = torch.randn(weights.size())
+        out *= std / torch.sqrt(out.pow(2).sum(1).expand_as(out))
+        return out
+    # --------------------------------------------------------------
+
+    def deleteVariables(self):
+        del self.values[:]
+        del self.outputs[:]
+        del self.actions[:]
+        del self.inputs[:]
+        del self.states[:]
 
     # At training  time, we always feed in the ground truth(captions) symbol to the RNN decoder.
     def forward(self, features, captions, states, maxlen, lengths, gt=False):
@@ -106,12 +132,20 @@ class DecoderPolicyGradient(nn.Module):
             for idx in range(0, maxlen):
                 # Get Network Output
                 hiddens, states = self.lstm(inputs, states)  # (batch_size, 1, hidden_size)
+                # Baseline Estimator ---------------------------------------
+                value  = self.critic_linear(hiddens.squeeze(1).detach())
+                # ----------------------------------------------------------
                 output = self.linear(hiddens.squeeze(1))  # (batch_size, vocab_size)
+                # Dropout
+                # output = self.dropOut(output)
                 # Get a Stochastic Action (Stochastic Policy)
-                action = self.getStochasticAction(output)
+                # action = self.getStochasticAction(output)
+                # Get a Deterministic Action (Deterministic Policy)
+                action = self.getDeterministicAction(output)
                 # Set LSTM Input with Ground Truth
                 inputs = self.embed(captions[:, idx]).unsqueeze(1)
                 # Append Results to List Variables
+                self.values.append(value)
                 self.outputs.append(output)
                 self.actions.append(action)
                 self.inputs.append(inputs)
@@ -121,12 +155,18 @@ class DecoderPolicyGradient(nn.Module):
             for idx in range(0, maxlen):
                 # Get Network Output
                 hiddens, states = self.lstm(inputs, states)  # (batch_size, 1, hidden_size)
+                # Baseline Estimator ---------------------------------------
+                value  = self.critic_linear(hiddens.squeeze(1).detach())
+                # ----------------------------------------------------------
                 output = self.linear(hiddens.squeeze(1))  # (batch_size, vocab_size)
                 # Get a Stochastic Action (Stochastic Policy)
                 action = self.getStochasticAction(output)
+                # Get a Deterministic Action (Deterministic Policy)
+                # action = self.getDeterministicAction(output)
                 # Set LSTM Input with LSTM Output (Detached!)
                 inputs = self.embed(action.detach())
                 # Append Results to List Variables
+                self.values.append(value)
                 self.outputs.append(output)
                 self.actions.append(action)
                 self.inputs.append(inputs)
@@ -205,8 +245,8 @@ class DecoderPolicyGradient(nn.Module):
             print(actions_rollouts)
 
         # Modify Types of Variable
-        actions_rollouts_numpy = actions_rollouts.cpu().numpy()
-        return actions_rollouts_numpy
+        # actions_rollouts_numpy = actions_rollouts.cpu().numpy()
+        return actions_rollouts
 
 
     def getMCRolloutSamples(self, inputs, states, actions, t, maxlen):
@@ -241,49 +281,55 @@ class DecoderPolicyGradient(nn.Module):
             predictions.append(entry)
         return predictions
 
-    def getRewardsRollouts(self, predictions, K, lengths, maxlen, coco_train, valids_train):
+    def getRewardsRollouts(self, predictions_rollouts, batch_size, K, lengths, maxlen, coco_train, valids_train):
+        # -------------------------------------------------------------------------------------------------
+        # for idx in range(maxlen-1):
+        # Evaluate COCO Metrics for Sentences of Each Batch (opt.batch_size = len(lengths))
+        # NEval = batch_size * K
+        # lang_stat = language_eval(predictions[idx*NEval:(idx+1)*NEval], coco_train, valids_train, NEval)
+        # -------------------------------------------------------------------------------------------------
+        # Initialize Variables
         rewards_rollouts = []
         lang_stat_rollouts = []
-        for k in range(K * (maxlen - 1)):
-            if 1:
-                lang_stat = language_eval(predictions[k * len(lengths):(k + 1) * len(lengths)], coco_train, valids_train)  # Batch-Based
-                BCMR = + 0.5 * lang_stat['Bleu_1'] + 0.5 * lang_stat['Bleu_2'] \
-                       + 1.0 * lang_stat['Bleu_3'] + 1.0 * lang_stat['Bleu_4'] \
-                       + 1.0 * lang_stat['CIDEr']  + 5.0 * lang_stat['METEOR'] \
-                       + 2.0 * lang_stat['ROUGE_L']
-            else:
-                BCMR = 1
-                lang_stat = {}
-                lang_stat['Bleu_1']  = BCMR
-                lang_stat['Bleu_2']  = BCMR
-                lang_stat['Bleu_3']  = BCMR
-                lang_stat['Bleu_4']  = BCMR
-                lang_stat['CIDEr']   = BCMR
-                lang_stat['METEOR']  = BCMR
-                lang_stat['ROUGE_L'] = BCMR
-            lang_stat_rollouts.append(lang_stat)
+        NEval = batch_size * (maxlen-1) * K
+        # Evaluate COCO Metrics
+        lang_stat = language_eval(predictions_rollouts, coco_train, valids_train, NEval, batch_size)
+        # Modify COCO Metrics
+        methods = lang_stat.keys()
+        for idx in range(maxlen-1):
+            lang_stat_rollout = {}
+            for method in methods:
+                # tmp1 = lang_stat[method][idx*(batch_size*K):(idx+1)*(batch_size*K)]
+                # tmp2 = self.values[idx + 1].data.cpu().numpy().repeat(3)
+                # lang_stat_rollout[method] = np.mean(tmp1 - tmp2)
+                lang_stat_rollout[method] = np.mean(lang_stat[method][idx*(batch_size*K):(idx+1)*(batch_size*K)])
+                # lang_stat_rollout[method] = np.mean(lang_stat[method][idx*(batch_size*K):(idx+1)*(batch_size*K)]) - float(self.values[idx+1].data.cpu().numpy())  # Subtract Baseline
+            lang_stat_rollouts.append(lang_stat_rollout)
+            # Calculate Reward - BCMR COCO Metric
+            BCMR = self.calcBCMR(lang_stat_rollout)
             rewards_rollouts.append(BCMR)
         return rewards_rollouts, lang_stat_rollouts
 
+    def calcBCMR(self, lang_stat):
+        BCMR = + 0.5 * lang_stat['Bleu_1'] + 0.5 * lang_stat['Bleu_2'] \
+               + 1.0 * lang_stat['Bleu_3'] + 1.0 * lang_stat['Bleu_4'] \
+               + 1.0 * lang_stat['CIDEr']  + 5.0 * lang_stat['METEOR'] \
+               + 2.0 * lang_stat['ROUGE_L']
+        return BCMR
+
     def getRewards(self, rewards_rollouts, K):
-        rewards = []
-        for idx in range(len(rewards_rollouts) / K):
-            reward = rewards_rollouts[idx * K] + \
-                     rewards_rollouts[idx * K + 1] + \
-                     rewards_rollouts[idx * K + 2]
-            reward = reward / K
-            rewards.append(reward)
-        rewards = torch.Tensor(rewards)
+        baseline = []
+        for idx in range(1, len(self.values)):
+            baseline.append(float(self.values[idx].mean().data.cpu().numpy()))
+        rewards = torch.Tensor(np.asarray(rewards_rollouts) - np.asarray(baseline))
         rewardsMax = torch.max(rewards)
         rewardsMin = torch.min(rewards)
         rewardsAvg = torch.mean(rewards)
-        rewards = (rewards - rewards.mean()) / (rewards.std() + np.finfo(np.float32).eps)  # baseline
         return rewards, rewardsMax, rewardsMin, rewardsAvg
 
     # Get an Action by using Stochastic Policy
     def getStochasticAction(self, output):
         distribution = nn.functional.softmax(output)
-        # action = torch.multinomial(distribution, 1, True)
         action = distribution.multinomial()
         return action
 
@@ -300,6 +346,13 @@ class DecoderPolicyGradient(nn.Module):
         outputs = torch.cat(self.outputs, 1).view(len(lengths), maxlen, -1)
         outputs = pack_padded_sequence(outputs, lengths, batch_first=True)[0]
         return outputs
+
+
+    # Convert Value Variable to Pack Padded Sequence
+    def convertValueVariable(self, maxlen, lengths):
+        values = torch.cat(self.values, 1).view(len(lengths), -1)
+        values = pack_padded_sequence(values, lengths, batch_first=True)[0]
+        return values
 
 
     def display_sentences(self, vocab, actions, imgids):
@@ -320,6 +373,69 @@ class DecoderPolicyGradient(nn.Module):
             print(entry)
 
 
+    # Display & Save Information MLE
+    def displaySaveInformationMLE(self, epoch, max_epochs, iter, total_train_iter, loss, current_lr, expr_dir, exp_id):
+        savePath = os.path.join(expr_dir, exp_id + "_MLE_log" + ".txt")
+        with open(savePath, 'a') as f:
+            log_print = '[Loss: MLE] Epoch [%2d/%2d], Step [%4d/%4d], Loss: %2.4f, Perplexity: %6.4f, lr: %1.1e' \
+                        % (epoch, max_epochs, iter, total_train_iter, loss.data[0], np.exp(loss.data[0]), current_lr)
+            print(log_print)
+            f.write(log_print)
+            f.write('\n')
+
+    # Display & Save Information COCO Evaluation Metric
+    def displaySaveInformationCOCOMetric(self, expr_dir, exp_id, lang_stats, mode):
+        if mode == 'MLE':
+            savePath = os.path.join(expr_dir, exp_id + "_MLE_log" + ".txt")
+        elif mode == 'REINFORCE':
+            savePath = os.path.join(expr_dir, exp_id + "_REINFORCE_log" + ".txt")
+        with open(savePath, 'a') as f:
+            log_print_stat = 'BLEU1: %.4f, BLEU2: %.4f, BLEU3: %.4f, BLEU4: %.4f, CIDER: %.4f, METEOR: %.4f, ROUGE: %.4f' % \
+                             (lang_stats['Bleu_1'], lang_stats['Bleu_2'], lang_stats['Bleu_3'], lang_stats['Bleu_4'], lang_stats['CIDEr'], lang_stats['METEOR'], lang_stats['ROUGE_L'])
+            print(log_print_stat)
+            f.write(log_print_stat)
+            f.write('\n\n')
+
+    # Display & Save Information REINFORCE
+    def displaySaveInformationREINFORCE(self, epoch, max_epochs, iter, total_train_iter, loss, rewardsMin, rewardsAvg, rewardsMax, current_lr, expr_dir, exp_id, predictions_rollouts, lang_stat_rollouts):
+        # Generate a Log String
+        log_print = '[REINFORCE] Epoch [%2d/%2d], Step [%4d/%4d], Loss: %2.4f, Perplexity: %6.4f, Rewards[min/avg/max]: [%.4f/%.4f/%.4f], Perplexity: [%6.4f/%6.4f/%6.4f], lr: %1.1e' % \
+                    (epoch, max_epochs, iter, total_train_iter,
+                     loss.data[0], np.exp(loss.data[0]),
+                     rewardsMin, rewardsAvg, rewardsMax,
+                     np.exp(rewardsMin), np.exp(rewardsAvg), np.exp(rewardsMax),
+                     current_lr)
+        print(log_print)
+
+        # Save & Print the Log
+        savePath = os.path.join(expr_dir, exp_id + "_REINFORCE_log" + ".txt")
+        with open(savePath, 'a') as f:
+            f.write(log_print)
+            f.write('\n')
+
+        # Save & Print the Log - Generated Sentences
+        savePath = os.path.join(expr_dir, exp_id + "_REINFORCE_GeneratedSentences" + ".txt")
+        with open(savePath, 'a') as f:
+            f.write(log_print)
+            f.write('\n')
+            for prediction in predictions_rollouts:
+                f.write(prediction['caption'])
+                f.write('\n')
+            f.write('\n\n')
+
+        # Save & Print the Log - COCO Metric
+        savePath = os.path.join(expr_dir, exp_id + "_REINFORCE_COCOMetric" + ".txt")
+        with open(savePath, 'a') as f:
+            f.write(log_print)
+            f.write('\n')
+            for idx, lang_stat in enumerate(lang_stat_rollouts):
+                log_print_stat = 'Rollout index: %3d, BLEU1: %.4f, BLEU2: %.4f, BLEU3: %.4f, BLEU4: %.4f, CIDER: %.4f, METEOR: %.4f, ROUGE: %.4f' % \
+                                 (idx, lang_stat['Bleu_1'], lang_stat['Bleu_2'], lang_stat['Bleu_3'], lang_stat['Bleu_4'], lang_stat['CIDEr'], lang_stat['METEOR'], lang_stat['ROUGE_L'])
+                print(log_print_stat)
+                f.write(log_print_stat)
+                f.write('\n')
+            f.write('\n\n')
+
     # RNN Input is 'not' a ground truth symbol(word).
     def sample(self, features, states):
         """Samples captions for given image features (Greedy search)."""
@@ -333,4 +449,5 @@ class DecoderPolicyGradient(nn.Module):
             inputs = self.embed(predicted)
         sampled_ids = torch.cat(sampled_ids, 1)  # (batch_size, 20)
         return sampled_ids.squeeze()
+
 
