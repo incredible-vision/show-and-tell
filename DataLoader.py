@@ -7,7 +7,7 @@ import pickle
 import argparse
 from PIL import Image
 import numpy as np
-from utils import Vocabulary
+from Utils import Vocabulary
 
 class CocoDataset(data.Dataset):
 
@@ -40,7 +40,7 @@ class CocoDataset(data.Dataset):
 
         target = torch.IntTensor(caption)
 
-        return img, target, data[index]['cocoid'] # data[index]['imgid']
+        return img, target, data[index]['cocoid']
 
     def __len__(self):
         return len(self.data)
@@ -61,7 +61,6 @@ def collate_fn(data):
         targets[i, :end] = cap[:end]
     return images, targets, lengths, imgids
 
-
 def get_loader(opt, mode='train', shuffle=True, num_workers=1, transform=None):
 
     coco = CocoDataset(root=opt.root_dir,
@@ -81,7 +80,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--root_dir', type=str, default='/home/gt/PycharmProjects/show-and-tell', help="root directory of the project")
+    parser.add_argument('--root_dir', type=str, default='/home/myunggi/Research/show-and-tell', help="root directory of the project")
     parser.add_argument('--data_json', type=str, default='data/data.json', help='input data list which includes captions and image information')
     parser.add_argument('--vocab_path', type=str, default='data/vocab.pkl', help='vocabulary wrapper')
     parser.add_argument('--crop_size', type=int, default=224, help='image crop size')
@@ -97,7 +96,7 @@ if __name__ == "__main__":
     ])
 
     data_loader = get_loader(args, transform=transform)
-
+    total_iter = len(data_loader)
     for i, (img, target, length) in enumerate(data_loader):
 
         print('done')

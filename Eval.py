@@ -17,7 +17,7 @@ from torch.nn.utils.rnn import pack_padded_sequence
 def language_eval(preds):
     import sys
     sys.path.append("coco-caption")
-    annFile = '/home/gt/D_Data/COCO/annotations_captions/captions_val2014.json'
+    annFile = '/home/myunggi/Repository/Data/COCO/annotations_captions/captions_val2014.json'
 
     from pycocotools.coco import COCO
     from pycocoevalcap.eval import COCOEvalCap
@@ -33,6 +33,13 @@ def language_eval(preds):
     # filter results to only those in MSCOCO validation set (will be about a third)
     preds_filt = [p for p in preds if p['image_id'] in valids]
     print('using %d/%d predictions' % (len(preds_filt), len(preds)))
+
+    if not os.path.exists('cache'):
+        os.makedirs('cache')
+
+    with open('cache/'+tmp_name+'.json', 'w') as f:
+        json.dump(preds_filt, f)
+
     json.dump(preds_filt, open('cache/'+tmp_name+'.json', 'w'))
 
     resFile = 'cache/'+tmp_name+'.json'
@@ -42,7 +49,7 @@ def language_eval(preds):
     cocoEval.evaluate()
 
     # delete the temp file
-    os.system('rm ' +tmp_name+'.json')
+    os.system('rm ' +'cache/'+tmp_name+'.json')
 
     # create output dictionary
     out = {}
@@ -62,6 +69,10 @@ def evaluation(model, crit, loader, vocab, opt):
     check_duplicate = []
     caption_vis = True
 
+    def convertOutputVariable(outputs, maxlen, lengths):
+        outputs = torch.cat(outputs, 1).view(len(lengths), maxlen, -1)
+        outputs = pack_padded_sequence(outputs, lengths, batch_first=True)[0]
+        return outputs
 
     for iter, (images, captions, lengths, imgids) in enumerate(loader):
         torch.cuda.synchronize()
@@ -82,7 +93,8 @@ def evaluation(model, crit, loader, vocab, opt):
 
         targets = pack_padded_sequence(captions, lengths, batch_first=True)[0]
 
-        outputs = model(images, captions, lengths)
+        outputs, seqlen = model(images, captions)
+        outputs = convertOutputVariable(outputs, seqlen, lengths)
 
         loss = crit(outputs, targets)
         loss_sum = loss_sum + loss

@@ -1,0 +1,7 @@
+data/*
+.idea/
+experiment/*
+pycocoevalcap/*
+pycocotools/*
+cache/*
+*.pyc
