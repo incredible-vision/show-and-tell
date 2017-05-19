@@ -29,7 +29,7 @@ class Trainer(object):
         self.validloader = validloader
 
         self.train_loss_win = None
-        self.train_perp_win = None
+        self.initial_flag = False
 
         with open(opt.vocab_path, 'rb') as f:
             self.vocab = pickle.load(f)
@@ -46,7 +46,7 @@ class Trainer(object):
         parameters = filter(lambda p: p.requires_grad, self.model.parameters())
         self.optimizer = optim.Adam(parameters, lr=opt.learning_rate)
 
-        if opt.start_from :
+        if self.opt.start_from :
             self.optimizer.load_state_dict(torch.load(os.path.join(self.opt.expr_dir, 'optimizer.pth')))
 
         print('done')
@@ -132,7 +132,9 @@ class Trainer(object):
                           % (epoch, self.opt.max_epochs, iter, self.total_train_iter,
                              loss.data[0], np.exp(loss.data[0])))
                     train_loss_history[total_iteration] = {'loss': loss.data[0], 'perplexity': np.exp(loss.data[0])}
-                    self.train_loss_win = visualize_loss(self.train_loss_win, train_loss_history, 'train_loss', 'loss')
+                    self.train_loss_win, self.initial_flag = visualize_loss(self.train_loss_win, train_loss_history,
+                                                                            'train_loss', 'loss', self.opt.start_from,
+                                                                            self.initial_flag)
 
                 # make evaluation on validation set, and save model
                 if (total_iteration % self.opt.save_checkpoint_every == 0):

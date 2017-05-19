@@ -21,18 +21,20 @@ def setup_logging(log_file='log.txt'):
     console.setFormatter(formatter)
     logging.getLogger('').addHandler(console)
 
-def visualize_loss(win, loss_history, title='loss', item_name='loss'):
+def visualize_loss(win, loss_history, title='loss', item_name='loss', start_from=False, initial_flag=False):
     opts_loss = dict(title=title)
 
     loss_hist_key = sorted(loss_history.keys())
-    if len(loss_history) == 2:
-        win = vis.line(np.array([l[item_name] for l in loss_history.values()]), np.array(loss_hist_key), opts=opts_loss)
+    if initial_flag == False:
+        if start_from or (loss_history) == 2:
+            win = vis.line(np.array([loss_history[l][item_name] for l in loss_hist_key]), np.array(loss_hist_key), opts=opts_loss)
+            initial_flag = True
 
-    if len(loss_history) > 2:
+    if initial_flag:
         win = vis.updateTrace(X=np.array([loss_hist_key[-1]]),
                               Y=np.array([loss_history[loss_hist_key[-1]][item_name]]),
                               win=win)
-    return win
+    return win, initial_flag
 
 class Vocabulary(object):
     def __init__(self):
