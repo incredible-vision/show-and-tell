@@ -69,6 +69,10 @@ def evaluation(model, crit, loader, vocab, opt):
     check_duplicate = []
     caption_vis = True
 
+    def convertOutputVariable(outputs, maxlen, lengths):
+        outputs = torch.cat(outputs, 1).view(len(lengths), maxlen, -1)
+        outputs = pack_padded_sequence(outputs, lengths, batch_first=True)[0]
+        return outputs
 
     for iter, (images, captions, lengths, imgids) in enumerate(loader):
         torch.cuda.synchronize()
@@ -89,7 +93,8 @@ def evaluation(model, crit, loader, vocab, opt):
 
         targets = pack_padded_sequence(captions, lengths, batch_first=True)[0]
 
-        outputs = model(images, captions, lengths)
+        outputs, seqlen = model(images, captions)
+        outputs = convertOutputVariable(outputs, seqlen, lengths)
 
         loss = crit(outputs, targets)
         loss_sum = loss_sum + loss

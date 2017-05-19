@@ -6,19 +6,21 @@ import os
 import time
 import pickle
 import json
-from data_loader import get_loader
-from utils import Vocabulary
-from model2 import ShowAttendTellModel
-from generator import GeneratorModel
+from DataLoader import get_loader
+from Utils import Vocabulary, visualize_loss
+from ModelSetup import model_setup
+from models.ShowTellModel import ShowTellModel
 from torch.autograd import Variable
 import torch.optim as optim
 from torch.nn.utils.rnn import pack_padded_sequence
 from torchvision import transforms
-from eval import evaluation
+from Eval import evaluation
 
 class Trainer(object):
     def __init__(self, opt, trainloader, validloader):
         self.opt = opt
+        self.num_gpu = opt.num_gpu
+        self.seqlen = None
 
         self.total_train_iter = len(trainloader)
         self.total_valid_iter = len(validloader)
@@ -26,30 +28,16 @@ class Trainer(object):
         self.trainloader = trainloader
         self.validloader = validloader
 
-        self.num_gpu = opt.num_gpu
-        self.load_model_path = opt.load_model_path
-        self.load_optimizer_path = opt.load_optim_path
+        self.train_loss_win = None
+        self.train_perp_win = None
 
         with open(opt.vocab_path, 'rb') as f:
             self.vocab = pickle.load(f)
 
-        self.model = ShowAttendTellModel(opt.hidden_size, opt.embed_size, len(self.vocab), opt.embed_size, opt)
-        # self.model = GeneratorModel(opt.hidden_size, opt.embed_size, len(self.vocab), opt.embed_size, opt)
-        # self.model = ShowTellModel(opt.embed_size, opt.hidden_size, len(self.vocab), 1)
+        opt.vocab_size = len(self.vocab)
 
-        if self.num_gpu == 1:
-            self.model.cuda()
-
-        elif self.num_gpu > 1:
-            self.model = nn.DataParallel(self.model.cuda(), device_ids=range(self.num_gpu))
-
-        if self.opt.load_pretrained:
-            if self.load_model_path:
-                self.load_model()
-                print('pretrained model loaded')
-
-            if self.load_optimizer_path:
-                self.load_optimizer()
+        """ setup model and infos for training """
+        self.model, self.infos = model_setup(opt, model_name='show_tell')
 
         """ This criterion combines LogSoftMax and NLLLoss in one single class """
         self.criterion = nn.CrossEntropyLoss()
@@ -58,38 +46,29 @@ class Trainer(object):
         parameters = filter(lambda p: p.requires_grad, self.model.parameters())
         self.optimizer = optim.Adam(parameters, lr=opt.learning_rate)
 
+        if opt.start_from :
+            self.optimizer.load_state_dict(torch.load(os.path.join(self.opt.expr_dir, 'optimizer.pth')))
+
         print('done')
-
-    def load_model(self):
-        """"""
-        return self.model.load_state_dict(torch.load(os.path.join(self.opt.expr_dir, 'model-best.pth')))
-
-    def load_optimizer(self):
-        """"""
-        return self.optimizer.load_state_dict(torch.load(os.path.join(self.opt.expr_dir, 'optimizer.pth')))
 
     def train(self):
 
-        infos = {}
-
-
-        if self.opt.start_from is not None and not self.opt.load_pretrained:
-
-            # open old infos and check if models are compatible
-            with open(os.path.join(self.opt.expr_dir, 'infos' + '.pkl')) as f:
-                infos = pickle.load(f)
-
-        total_iteration = infos.get('total_iter', 0)
-        loaded_iteration = infos.get('iter', 0)
-        loaded_epoch = infos.get('epoch', 1)
-        val_result_history = infos.get('val_result_history', {})
-        loss_history = infos.get('loss_history', {})
-        lr_history = infos.get('lr_history', {})
+        total_iteration = self.infos.get('total_iter', 0)
+        loaded_iteration = self.infos.get('iter', 0)
+        loaded_epoch = self.infos.get('epoch', 0)
+        val_result_history = self.infos.get('val_result_history', {})
+        loss_history = self.infos.get('loss_history', {})
+        lr_history = self.infos.get('lr_history', {})
+        train_loss_history = self.infos.get('train_loss_history', {})
 
         # loading a best validation score
         if self.opt.load_best_score == True:
-            best_val_score = infos.get('best_val_score', None)
+            best_val_score = self.infos.get('best_val_score', None)
 
+        def convertOutputVariable(outputs, maxlen, lengths):
+            outputs = torch.cat(outputs, 1).view(len(lengths), maxlen, -1)
+            outputs = pack_padded_sequence(outputs, lengths, batch_first=True)[0]
+            return outputs
 
         def clip_gradient(optimizer, grad_clip):
             for group in optimizer.param_groups:
@@ -100,7 +79,7 @@ class Trainer(object):
             for group in optimizer.param_groups:
                 group['lr'] = lr
 
-        for epoch in range(1, 1 + self.opt.max_epochs):
+        for epoch in range(loaded_epoch + 1, 1 + self.opt.max_epochs):
 
             if epoch > self.opt.learning_rate_decay_start and self.opt.learning_rate_decay_start >= 1:
                 fraction = (epoch - self.opt.learning_rate_decay_start) // self.opt.learning_rate_decay_every
@@ -110,16 +89,12 @@ class Trainer(object):
             else:
                 self.opt.current_lr = self.opt.learning_rate
 
-            if epoch < loaded_epoch:
-                continue
+            self.model.train()
 
             for iter, (images, captions, lengths, imgids) in enumerate(self.trainloader):
 
                 iter += 1
                 total_iteration += 1
-                if iter <= loaded_iteration:
-                    continue
-
 
                 torch.cuda.synchronize()
                 start = time.time()
@@ -137,7 +112,12 @@ class Trainer(object):
                 # Forward, Backward and Optimize
                 self.model.zero_grad()
 
-                outputs = self.model(images, captions[:,:-1], lengths)
+                # Sequence Length, we can manually designate maximum sequence length
+                # or get maximum sequence length in ground truth captions
+                seqlen = self.seqlen if self.seqlen is not None else lengths[0]
+
+                outputs = self.model(images, captions[:,:-1], seqlen)
+                outputs = convertOutputVariable(outputs, seqlen, lengths)
 
                 loss = self.criterion(outputs, targets)
                 loss.backward()
@@ -151,9 +131,12 @@ class Trainer(object):
                     print('Epoch [%d/%d], Step [%d/%d], Loss: %.4f, Perplexity: %5.4f'
                           % (epoch, self.opt.max_epochs, iter, self.total_train_iter,
                              loss.data[0], np.exp(loss.data[0])))
+                    train_loss_history[total_iteration] = {'loss': loss.data[0], 'perplexity': np.exp(loss.data[0])}
+                    self.train_loss_win = visualize_loss(self.train_loss_win, train_loss_history, 'train_loss', 'loss')
 
                 # make evaluation on validation set, and save model
                 if (total_iteration % self.opt.save_checkpoint_every == 0):
+                    print('start evaluate ...')
                     val_loss, predictions, lang_stats = evaluation(self.model, self.criterion,
                                                                    self.validloader, self.vocab, self.opt)
                     val_result_history[total_iteration] = {'loss': val_loss, 'lang_stats': lang_stats,
@@ -182,25 +165,27 @@ class Trainer(object):
                     torch.save(self.optimizer.state_dict(), optimizer_path)
 
                     # Dump miscalleous informations
-                    infos['total_iter'] = total_iteration
-                    infos['iter'] = iter
-                    infos['epoch'] = epoch
-                    infos['best_val_score'] = best_val_score
-                    infos['opt'] = self.opt
-                    infos['val_result_history'] = val_result_history
-                    infos['loss_history'] = loss_history
-                    infos['lr_history'] = lr_history
+                    self.infos['total_iter'] = total_iteration
+                    self.infos['iter'] = iter
+                    self.infos['epoch'] = epoch
+                    self.infos['best_val_score'] = best_val_score
+                    self.infos['opt'] = self.opt
+                    self.infos['val_result_history'] = val_result_history
+                    self.infos['loss_history'] = loss_history
+                    self.infos['lr_history'] = lr_history
+                    self.infos['train_loss_history'] = train_loss_history
                     with open(os.path.join(self.opt.expr_dir, 'infos' + '.pkl'), 'wb') as f:
-                        pickle.dump(infos, f)
+                        pickle.dump(self.infos, f)
 
                     if best_flag:
                         checkpoint_path = os.path.join(self.opt.expr_dir, 'model-best.pth')
                         torch.save(self.model.state_dict(), checkpoint_path)
                         print("model saved to {}".format(self.opt.expr_dir))
                         with open(os.path.join(self.opt.expr_dir, 'infos' + '-best.pkl'), 'wb') as f:
-                            pickle.dump(infos, f)
+                            pickle.dump(self.infos, f)
 
-
+class GAN_Trainer(object):
+    """ Gan"""
 
 if __name__ == '__main__':
 
