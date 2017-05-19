@@ -2,3 +2,5 @@ COCO
 data
 pycocoevalcap
 cache
+.idea
+*.pyc
