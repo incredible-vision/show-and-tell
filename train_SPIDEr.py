@@ -244,10 +244,10 @@ class Trainer(object):
                 # -----------------------------------------------------------
 
                 # Calculate Rewards - Evaluate COCO Metrics
-                rewards_rollouts, lang_stat_rollouts = self.decoderPolicyGradient.getRewardsRollouts(predictions_rollouts, self.opt.batch_size, self.opt.MC_rollouts, lengths, maxSequenceLength, self.coco_train, self.valid_train)
+                rewards_batch, rewards_rollouts, lang_stat_rollouts = self.decoderPolicyGradient.getRewardsRollouts(predictions_rollouts, self.opt.batch_size, self.opt.MC_rollouts, lengths, maxSequenceLength, self.coco_train, self.valid_train)
 
                 # Calculate Rewards
-                rewards, rewardsMax, rewardsMin, rewardsAvg = self.decoderPolicyGradient.getRewards(rewards_rollouts, self.opt.MC_rollouts)
+                rewards, rewardsMax, rewardsMin, rewardsAvg = self.decoderPolicyGradient.getRewards(rewards_batch)
 
                 # Training the Network using REINFORCE : Calculate loss and Optimize the Network
                 #  - actions: list [torch.longTensor, torch.longTensor, ..., torch.longTensor]
@@ -255,9 +255,11 @@ class Trainer(object):
                 #  - rewards: [torch.FloatTensor of size 31]
                 #  -       r: float
                 # ------------------------------------------------------------------------------
-                for action, r in zip(self.decoderPolicyGradient.actions[1:], rewards):
-                    action.reinforce(r)
-                autograd.backward(self.decoderPolicyGradient.actions[1:], [None for _ in self.decoderPolicyGradient.actions[1:]])
+                # self.decoderPolicyGradient.actions: 19xbatch_size
+                # rewards:
+                for action, r in zip(self.decoderPolicyGradient.actions, rewards):
+                    action.reinforce(r.unsqueeze(1))
+                autograd.backward(self.decoderPolicyGradient.actions, [None for _ in self.decoderPolicyGradient.actions])
                 clip_gradient(self.optimizer, self.opt.grad_clip)
                 self.optimizer.step()
 
@@ -265,14 +267,15 @@ class Trainer(object):
                 #  - value  = self.critic_linear(hiddens.squeeze(1).detach())
                 #  - self.values.append(value.mean())
                 #  - nn.MSELOSS(self.decoderPolicyGradient.values[1:], x)
-                loss_critic = self.criterion_critic(torch.cat([_.mean() for _ in self.decoderPolicyGradient.values[1:]]).contiguous(), Variable(torch.Tensor(rewards_rollouts).cuda(), requires_grad=False))
+                # loss_critic = self.criterion_critic(torch.cat([_.mean() for _ in self.decoderPolicyGradient.values[1:]]).contiguous(), Variable(torch.Tensor(rewards_rollouts).cuda(), requires_grad=False))
+                loss_critic = torch.mean(torch.pow(torch.stack(self.decoderPolicyGradient.values).squeeze() - Variable(rewards.cuda(), requires_grad=False), 2))
                 loss_critic.backward()
                 clip_gradient(self.optimizer_critic, self.opt.grad_clip)
                 self.optimizer_critic.step()
 
                 # Display Information :: REINFORCE
                 if iter % self.opt.log_step == 0:
-                    self.decoderPolicyGradient.displaySaveInformationREINFORCE(epoch, self.opt.max_epochs, iter, self.total_train_iter, loss, rewardsMin, rewardsAvg, rewardsMax, self.opt.current_lr, self.opt.expr_dir, self.opt.exp_id, predictions_rollouts, lang_stat_rollouts)
+                    self.decoderPolicyGradient.displaySaveInformationREINFORCE(epoch, self.opt.max_epochs, iter, self.total_train_iter, loss, loss_critic, rewardsMin, rewardsAvg, rewardsMax, self.opt.current_lr, self.opt.expr_dir, self.opt.exp_id, predictions_rollouts, lang_stat_rollouts)
 
                 # Delete Variables every iteration
                 self.decoderPolicyGradient.deleteVariables()

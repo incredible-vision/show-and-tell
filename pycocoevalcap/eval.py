@@ -59,9 +59,7 @@ class COCOEvalCap:
         # =================================================
         # Modify gts and res to Evaluate COCO Metric with Vectorization
         if len(imgIds) < 512:  # Training Only!
-            print(len(gts), len(res), len(imgIds))
             gts, res = self.modifygtsres(gts, res, imgIds, NEval, batch_size)
-        print(len(gts), len(res), len(imgIds))
 
         # For Batch Error, You need to change batch size on the if statement.
         if 0:
@@ -115,20 +113,23 @@ class COCOEvalCap:
         return res
 
     def modifygtsres(self, gts, res, imgIds, NEval, batch_size):
+        if 0:
+            print(len(gts), len(res), len(imgIds))
         for imgId in imgIds:  # opt.batch_size
             resIdx = imgId * 1000
             tmp_res = res[imgId]
-            if int(len(tmp_res)) != int(NEval/batch_size):
-                if len(tmp_res) > int(NEval/batch_size):
-                    print('Batch Size: 255 Error')
-                    print('len(res[imgId]):%d' % (len(res[imgId])))
-                    print('NEval:%d, batch_size:%d, int(NEval/batch_size): %d)' % (NEval, batch_size, int(NEval / batch_size)))
-                    print(tmp_res)
-                else:
-                    print('len(res[imgId]):%d' % (len(res[imgId])))
-                    print('NEval:%d, batch_size:%d, int(NEval/batch_size): %d)' % (NEval, batch_size, int(NEval / batch_size)))
-                    print(tmp_res)
-                    print('----------------------------')
+            if 0:
+                if int(len(tmp_res)) != int(NEval/batch_size):
+                    if len(tmp_res) > int(NEval/batch_size):
+                        print('Batch Size: 255 Error')
+                        print('len(res[imgId]):%d' % (len(res[imgId])))
+                        print('NEval:%d, batch_size:%d, int(NEval/batch_size): %d)' % (NEval, batch_size, int(NEval / batch_size)))
+                        print(tmp_res)
+                    else:
+                        print('len(res[imgId]):%d' % (len(res[imgId])))
+                        print('NEval:%d, batch_size:%d, int(NEval/batch_size): %d)' % (NEval, batch_size, int(NEval / batch_size)))
+                        print(tmp_res)
+                        print('----------------------------')
             for idx in range(min(len(tmp_res), int(NEval/batch_size))):
                 res[resIdx] = []
                 res[resIdx].append(tmp_res[idx])
@@ -141,4 +142,6 @@ class COCOEvalCap:
                 gts[gtsIdx] = gts[imgId]
                 gtsIdx += 1
             del gts[imgId]
+        if 0:
+            print(len(gts), len(res), len(imgIds))
         return gts, res

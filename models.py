@@ -229,13 +229,13 @@ class DecoderPolicyGradient(nn.Module):
                 inputs = self.embed(action)
                 # Append Results to List Variables
                 actions.append(actions_detached[t].data)  # Main Actions
-                if t >= 1:
-                    for k in range(K):
-                        inputs_detached = inputs.detach()
-                        states_detached = [s.detach() for s in states]
-                        actions_copied  = list(actions)
-                        actions_rollout = self.getMCRolloutSamples(inputs_detached, states_detached, actions_copied, t, maxlen)
-                        actions_rollouts.append(actions_rollout)
+                # if t >= 1:
+                for k in range(K):
+                    inputs_detached = inputs.detach()
+                    states_detached = [s.detach() for s in states]
+                    actions_copied  = list(actions)
+                    actions_rollout = self.getMCRolloutSamples(inputs_detached, states_detached, actions_copied, t, maxlen)
+                    actions_rollouts.append(actions_rollout)
             # Modify Types of Variables
             actions_rollouts = torch.stack(actions_rollouts, 0).squeeze().view(-1, maxlen)
 
@@ -267,7 +267,8 @@ class DecoderPolicyGradient(nn.Module):
         # Initialize List Variables
         predictions = []
         result_sentences = []
-        for sentence_ids in actions_rollouts[:, 1:]:  # Without <start>
+        # for sentence_ids in actions_rollouts[:, 1:]:  # Without <start>
+        for sentence_ids in actions_rollouts:  # With <start>
             sampled_caption = []
             for word_id in sentence_ids:
                 word = vocab.idx2word[word_id]
@@ -289,26 +290,36 @@ class DecoderPolicyGradient(nn.Module):
         # lang_stat = language_eval(predictions[idx*NEval:(idx+1)*NEval], coco_train, valids_train, NEval)
         # -------------------------------------------------------------------------------------------------
         # Initialize Variables
-        rewards_rollouts = []
-        lang_stat_rollouts = []
-        NEval = batch_size * (maxlen-1) * K
+        # NEval = batch_size * (maxlen-1) * K  # without <start>
+        NEval = batch_size * maxlen * K  # with <start>
         # Evaluate COCO Metrics
         lang_stat = language_eval(predictions_rollouts, coco_train, valids_train, NEval, batch_size)
         # Modify COCO Metrics
         methods = lang_stat.keys()
-        for idx in range(maxlen-1):
+        # For Batch Error, You need to change batch size on the if statement.
+        # modified_batch_size = len(lang_stat[methods[0]]) / K / (maxlen-1)
+        modified_batch_size = len(lang_stat[methods[0]]) / K / maxlen
+        # Calculate Reward - BCMR COCO Metric
+        BCMR = self.calcBCMR(lang_stat)
+        # Modify COCO Metrics
+        rewards_batch = []
+        rewards_rollouts = []
+        lang_stat_rollouts = []
+        # for idx in range(maxlen-1):
+        for idx in range(maxlen):
+            # Average Calculated BCMR for K MC Rollout Samples
+            BCMRAvgKRollouts = np.mean(np.reshape(BCMR[idx*(modified_batch_size*K):(idx+1)*(modified_batch_size*K)], (modified_batch_size, K)), 1)
+            # Average Calculated BCMR for K MC Rollout Samples & Batch Samples
+            BCMRAvgKRolloutsAvgBatch = np.mean(BCMRAvgKRollouts)
+            # Average Calculated COCO Metrics K MC Rollout Samples & Batch Samples
             lang_stat_rollout = {}
             for method in methods:
-                # tmp1 = lang_stat[method][idx*(batch_size*K):(idx+1)*(batch_size*K)]
-                # tmp2 = self.values[idx + 1].data.cpu().numpy().repeat(3)
-                # lang_stat_rollout[method] = np.mean(tmp1 - tmp2)
-                lang_stat_rollout[method] = np.mean(lang_stat[method][idx*(batch_size*K):(idx+1)*(batch_size*K)])
-                # lang_stat_rollout[method] = np.mean(lang_stat[method][idx*(batch_size*K):(idx+1)*(batch_size*K)]) - float(self.values[idx+1].data.cpu().numpy())  # Subtract Baseline
+                lang_stat_rollout[method] = np.mean(lang_stat[method][idx*(modified_batch_size*K):(idx+1)*(modified_batch_size*K)])
+            # Append Results to List Variables
+            rewards_batch.append(BCMRAvgKRollouts)  # modified_batch_size x 1
+            rewards_rollouts.append(BCMRAvgKRolloutsAvgBatch)  # 1
             lang_stat_rollouts.append(lang_stat_rollout)
-            # Calculate Reward - BCMR COCO Metric
-            BCMR = self.calcBCMR(lang_stat_rollout)
-            rewards_rollouts.append(BCMR)
-        return rewards_rollouts, lang_stat_rollouts
+        return rewards_batch, rewards_rollouts, lang_stat_rollouts
 
     def calcBCMR(self, lang_stat):
         BCMR = + 0.5 * lang_stat['Bleu_1'] + 0.5 * lang_stat['Bleu_2'] \
@@ -317,14 +328,18 @@ class DecoderPolicyGradient(nn.Module):
                + 2.0 * lang_stat['ROUGE_L']
         return BCMR
 
-    def getRewards(self, rewards_rollouts, K):
+    def getRewards(self, rewards_batch):
         baseline = []
-        for idx in range(1, len(self.values)):
+        for idx in range(len(self.values)):
             baseline.append(float(self.values[idx].mean().data.cpu().numpy()))
-        rewards = torch.Tensor(np.asarray(rewards_rollouts) - np.asarray(baseline))
-        rewardsMax = torch.max(rewards)
-        rewardsMin = torch.min(rewards)
-        rewardsAvg = torch.mean(rewards)
+        rewards_batch = np.asarray(rewards_batch)
+        baseline      = np.reshape(np.asarray(baseline), [-1, 1])
+        rows, cols    = rewards_batch.shape
+        # Calculate Rewards with Baseline Estimator (Advantage Function)
+        rewards = torch.Tensor(rewards_batch - baseline).cuda()
+        rewardsMax = np.max(rewards_batch)
+        rewardsMin = np.min(rewards_batch)
+        rewardsAvg = np.mean(rewards_batch)
         return rewards, rewardsMax, rewardsMin, rewardsAvg
 
     # Get an Action by using Stochastic Policy
@@ -397,11 +412,12 @@ class DecoderPolicyGradient(nn.Module):
             f.write('\n\n')
 
     # Display & Save Information REINFORCE
-    def displaySaveInformationREINFORCE(self, epoch, max_epochs, iter, total_train_iter, loss, rewardsMin, rewardsAvg, rewardsMax, current_lr, expr_dir, exp_id, predictions_rollouts, lang_stat_rollouts):
+    def displaySaveInformationREINFORCE(self, epoch, max_epochs, iter, total_train_iter, loss, loss_critic, rewardsMin, rewardsAvg, rewardsMax, current_lr, expr_dir, exp_id, predictions_rollouts, lang_stat_rollouts):
         # Generate a Log String
-        log_print = '[REINFORCE] Epoch [%2d/%2d], Step [%4d/%4d], Loss: %2.4f, Perplexity: %6.4f, Rewards[min/avg/max]: [%.4f/%.4f/%.4f], Perplexity: [%6.4f/%6.4f/%6.4f], lr: %1.1e' % \
+        log_print = '[REINFORCE] Epoch [%2d/%2d], Step [%4d/%4d], Loss/LossCritic: %2.4f/%2.4f, Perplexity: %6.4f/%6.4f, Rewards[min/avg/max]: [%.4f/%.4f/%.4f], Perplexity: [%6.4f/%6.4f/%6.4f], lr: %1.1e' % \
                     (epoch, max_epochs, iter, total_train_iter,
-                     loss.data[0], np.exp(loss.data[0]),
+                     loss.data[0], loss_critic.data[0],
+                     np.exp(loss.data[0]), np.exp(loss_critic.data[0]),
                      rewardsMin, rewardsAvg, rewardsMax,
                      np.exp(rewardsMin), np.exp(rewardsAvg), np.exp(rewardsMax),
                      current_lr)

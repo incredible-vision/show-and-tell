@@ -41,7 +41,8 @@ def language_eval(preds, coco, valids, NEval, batch_size):
     # create output dictionary
     out = {}
     for metric, score in cocoEval.eval.items():
-        out[metric] = score
+        # out[metric] = score
+        out[metric] = np.asarray(score)
 
     return out
 
