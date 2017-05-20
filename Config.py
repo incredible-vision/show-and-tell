@@ -15,10 +15,11 @@ def parse_opt():
     parser.add_argument('--num_gpu', type=int, default=1, help='number of gpus available, if set to 0, use cpu instead')
     parser.add_argument('--random_seed', type=int, default=123, help='random seed number, to reproduce the result, fix the number')
     parser.add_argument('--crop_size', type=int, default=224, help='image crop size, spatial dimension of input to the encoder')
-    parser.add_argument('--batch_size', type=int, default=128, help='batch size for training')
+    parser.add_argument('--image_size', type=int, default=224, help='image crop size, spatial dimension of input to the encoder')
+    parser.add_argument('--batch_size', type=int, default=80, help='batch size for training')
 
     parser.add_argument('--expr_dir', type=str, default='experiment', help='experiment directory')
-    parser.add_argument('--exp_id', type=str, default='showattendtell', help='experiment id')
+    parser.add_argument('--exp_id', type=str, default='show_attend_tell', help='experiment id')
     parser.add_argument('--user_id', type=str, default='myunggi', help='user id')
     parser.add_argument('--start_from', type=str, default=None, help='continue from this configurations')
 
@@ -49,7 +50,7 @@ def parse_opt():
 
     parser.add_argument('--language_eval', type=int, default=1, help='1 for Cider score, 0 for log loss')
 
-    parser.add_argument('--save_checkpoint_every', type=int, default=3236, help='how often to save a model checkpoint (in iterations)?')
+    parser.add_argument('--save_checkpoint_every', type=int, default=1000, help='how often to save a model checkpoint (in iterations)?')
 
     args = parser.parse_args()
 

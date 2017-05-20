@@ -12,9 +12,13 @@ from ModelSetup import model_setup
 from models.ShowTellModel import ShowTellModel
 from torch.autograd import Variable
 import torch.optim as optim
+from torch.nn.utils.clip_grad import clip_grad_norm
 from torch.nn.utils.rnn import pack_padded_sequence
 from torchvision import transforms
 from Eval import evaluation
+from visualizer import Visdom
+
+vis = Visdom()
 
 class Trainer(object):
     def __init__(self, opt, trainloader, validloader):
@@ -31,27 +35,282 @@ class Trainer(object):
         self.train_loss_win = None
         self.train_perp_win = None
 
+        self.real_label = 1
+        self.fake_label = 0
+
         with open(opt.vocab_path, 'rb') as f:
             self.vocab = pickle.load(f)
 
         opt.vocab_size = len(self.vocab)
 
         """ setup model and infos for training """
-        self.model, self.infos = model_setup(opt, model_name='show_tell')
+        self.encoder, _ = model_setup(opt, model_name='cnn_encoder_feature')
+        self.generator, self.infos_gen = model_setup(opt, model_name='show_attend_tell')
+        # self.discriminator, self.infos_disc = model_setup(opt, model_name='discriminator')
 
         """ This criterion combines LogSoftMax and NLLLoss in one single class """
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion_MLE = nn.CrossEntropyLoss()
+        self.criterion_G = nn.CrossEntropyLoss()
+        self.criterion_D = nn.CrossEntropyLoss()
 
         """ only update trainable parameters """
-        parameters = filter(lambda p: p.requires_grad, self.model.parameters())
-        self.optimizer = optim.Adam(parameters, lr=opt.learning_rate)
+        parameters = list(self.generator.parameters())
+        parameters = filter(lambda p: p.requires_grad, parameters)
+        # parameters = filter(lambda p: p.requires_grad, self.generator.parameters())
+        self.optimizerM = optim.Adam(parameters, lr=opt.learning_rate)
+
+        # parameters = filter(lambda p: p.requires_grad, self.generator.parameters())
+        # self.optimizerG = optim.Adam(parameters, lr=opt.learning_rate)
+
+        # parameters = filter(lambda p: p.requires_grad, self.discriminator.parameters())
+        # self.optimizerD = optim.Adam(parameters, lr=opt.learning_rate)
 
         if opt.start_from :
-            self.optimizer.load_state_dict(torch.load(os.path.join(self.opt.expr_dir, 'optimizer.pth')))
+            continue_path = os.path.join(opt.root_dir, 'experiment', opt.user_id, opt.exp_id,'optimizer.pth')
+            self.optimizerM.load_state_dict(torch.load(continue_path))
 
         print('done')
 
-    def train(self):
+    def train_mle(self):
+
+        loaded_epoch = self.infos_gen.get('epoch', 0)
+        loaded_iteration = self.infos_gen.get('iter', 0)
+        lr_history = self.infos_gen.get('lr_history', {})
+        loss_history = self.infos_gen.get('loss_history', {})
+        total_iteration = self.infos_gen.get('total_iter', 0)
+
+        val_result_history = self.infos_gen.get('val_result_history', {})
+        train_loss_history = self.infos_gen.get('train_loss_history', {})
+
+        # loading a best validation score
+        if self.opt.load_best_score == True:
+            best_val_score = self.infos_gen.get('best_val_score', None)
+
+
+        def convertOutputVariable(outputs, maxlen, lengths):
+            outputs = torch.cat(outputs, 1).view(len(lengths), maxlen, -1)
+            outputs = pack_padded_sequence(outputs, lengths, batch_first=True)[0]
+            return outputs
+
+        def clip_gradient(optimizer, grad_clip):
+            for group in optimizer.param_groups:
+                for param in group['params']:
+                    param.grad.data.clamp_(-grad_clip, grad_clip)
+
+        def set_lr(optimizer, lr):
+            for group in optimizer.param_groups:
+                group['lr'] = lr
+
+        for epoch in range(loaded_epoch + 1, 1 + self.opt.max_epochs):
+
+            if epoch > self.opt.learning_rate_decay_start and self.opt.learning_rate_decay_start >= 1:
+                fraction = (epoch - self.opt.learning_rate_decay_start) // self.opt.learning_rate_decay_every
+                decay_factor = self.opt.learning_rate_decay_rate ** fraction
+                self.opt.current_lr = self.opt.learning_rate * decay_factor
+                set_lr(self.optimizerM, self.opt.current_lr)
+            else:
+                self.opt.current_lr = self.opt.learning_rate
+
+            self.encoder.train()
+            self.generator.train()
+
+            for iter, (images, captions, lengths, imgids) in enumerate(self.trainloader):
+
+                iter += 1
+                total_iteration += 1
+
+                torch.cuda.synchronize()
+                start = time.time()
+
+                # Set mini-batch dataset
+                images = Variable(images)
+                captions = Variable(captions)
+
+                if self.num_gpu > 0:
+                    images = images.cuda()
+                    captions = captions.cuda()
+
+                lengths = [l-1 for l in lengths]
+                targets = pack_padded_sequence(captions[:,1:], lengths, batch_first=True)[0]
+                # Forward, Backward and Optimize
+                self.encoder.zero_grad()
+                self.generator.zero_grad()
+                self.optimizerM.zero_grad()
+                # Sequence Length, we can manually designate maximum sequence length
+                # or get maximum sequence length in ground truth captions
+                seqlen = self.seqlen if self.seqlen is not None else lengths[0]
+
+                features = self.encoder(images)
+                outputs = self.generator(features, captions[:,:-1], seqlen)
+                outputs = convertOutputVariable(outputs, seqlen, lengths)
+
+                loss = self.criterion_MLE(outputs, targets)
+                loss.backward()
+                clip_gradient(self.optimizerM, self.opt.grad_clip)
+                self.optimizerM.step()
+
+                torch.cuda.synchronize()
+                end = time.time()
+
+                if iter % self.opt.log_step == 0:
+                    print('Epoch [%d/%d], Step [%d/%d], Loss: %.4f, Perplexity: %5.4f'
+                          % (epoch, self.opt.max_epochs, iter, self.total_train_iter,
+                             loss.data[0], np.exp(loss.data[0])))
+                    train_loss_history[total_iteration] = {'loss': loss.data[0], 'perplexity': np.exp(loss.data[0])}
+                    self.train_loss_win = visualize_loss(self.train_loss_win, train_loss_history, 'train_loss', 'loss')
+
+                # make evaluation on validation set, and save model
+                if (total_iteration % self.opt.save_checkpoint_every == 0):
+                    print('start evaluating ...')
+                    val_loss, predictions, lang_stats = evaluation((self.encoder, self.generator), self.criterion_MLE,
+                                                                   self.validloader, self.vocab, self.opt)
+                    val_result_history[total_iteration] = {'loss': val_loss, 'lang_stats': lang_stats,
+                                                           'predictions': predictions}
+
+                    # Write the training loss summary
+                    # loss_history[total_iteration] = loss.data[0].cpu().numpy()[0]
+                    loss_history[total_iteration] = loss.data[0]
+                    lr_history[total_iteration] = self.opt.current_lr
+
+                    # Save model if is improving on validation result
+                    if self.opt.language_eval == 1:
+                        current_score = lang_stats['CIDEr']
+                    else:
+                        current_score = - val_loss
+
+                    best_flag = False
+                    if best_val_score is None or current_score > best_val_score:
+                        best_val_score = current_score
+                        best_flag = True
+
+                    checkpoint_path = os.path.join(self.opt.expr_dir, 'model-encoder.pth')
+                    torch.save(self.encoder.state_dict(), checkpoint_path)
+                    print("model saved to {}".format(checkpoint_path))
+                    checkpoint_path = os.path.join(self.opt.expr_dir, 'model-decoder.pth')
+                    torch.save(self.generator.state_dict(), checkpoint_path)
+                    print("model saved to {}".format(checkpoint_path))
+                    optimizer_path = os.path.join(self.opt.expr_dir, 'optimizer.pth')
+                    torch.save(self.optimizerM.state_dict(), optimizer_path)
+                    print("optimizer saved to {}".format(optimizer_path))
+
+                    # Dump miscalleous informations
+                    self.infos_gen['total_iter'] = total_iteration
+                    self.infos_gen['iter'] = iter
+                    self.infos_gen['epoch'] = epoch
+                    self.infos_gen['best_val_score'] = best_val_score
+                    self.infos_gen['opt'] = self.opt
+                    self.infos_gen['val_result_history'] = val_result_history
+                    self.infos_gen['loss_history'] = loss_history
+                    self.infos_gen['lr_history'] = lr_history
+                    self.infos_gen['train_loss_history'] = train_loss_history
+                    with open(os.path.join(self.opt.expr_dir, 'infos' + '.pkl'), 'wb') as f:
+                        pickle.dump(self.infos_gen, f)
+
+                    if best_flag:
+                        checkpoint_path = os.path.join(self.opt.expr_dir, 'model-encoder-best.pth')
+                        torch.save(self.encoder.state_dict(), checkpoint_path)
+                        print("model saved to {}".format(checkpoint_path))
+                        checkpoint_path = os.path.join(self.opt.expr_dir, 'model-decoder-best.pth')
+                        torch.save(self.generator.state_dict(), checkpoint_path)
+                        print("model saved to {}".format(checkpoint_path))
+                        with open(os.path.join(self.opt.expr_dir, 'infos' + '-best.pkl'), 'wb') as f:
+                            pickle.dump(self.infos_gen, f)
+
+    def train_discriminator(self):
+        """"""
+        total_iteration = self.infos_disc.get('total_iter', 0)
+        loaded_iteration = self.infos_disc.get('iter', 0)
+        loaded_epoch = self.infos_disc.get('epoch', 0)
+        val_result_history = self.infos_disc.get('val_result_history', {})
+        loss_history = self.infos_disc.get('loss_history', {})
+        lr_history = self.infos_disc.get('lr_history', {})
+        train_loss_history = self.infos_disc.get('train_loss_history', {})
+
+        if self.opt.load_best_score == True:
+            best_val_score = self.infos_disc.get('best_val_score', None)
+
+        def clip_gradient(optimizer, grad_clip):
+            for group in optimizer.param_groups:
+                for param in group['params']:
+                    param.grad.data.clamp_(-grad_clip, grad_clip)
+
+        def set_lr(optimizer, lr):
+            for group in optimizer.param_groups:
+                group['lr'] = lr
+
+
+        image_inputs = torch.FloatTensor(self.opt.batch_size, 3, self.opt.image_size, self.opt.image_size)
+        labels = torch.FloatTensor(self.opt.batch_size)
+
+        if self.opt.num_gpu > 0:
+            image_inputs = image_inputs.cuda()
+            labels = labels.cuda()
+
+        image_inputs = Variable(image_inputs)
+        labels = Variable(labels)
+
+        for epoch in range(loaded_epoch + 1, 1 + self.opt.max_epochs):
+
+            if epoch > self.opt.learning_rate_decay_start and self.opt.learning_rate_decay_start >= 1:
+                fraction = (epoch - self.opt.learning_rate_decay_start) // self.opt.learning_rate_decay_every
+                decay_factor = self.opt.learning_rate_decay_rate ** fraction
+                self.opt.current_lr = self.opt.learning_rate * decay_factor
+                set_lr(self.optimizer, self.opt.current_lr)
+            else:
+                self.opt.current_lr = self.opt.learning_rate
+
+            self.discriminator.train()
+
+            for iter, (images, captions, lengths, imgids) in enumerate(self.trainloader):
+
+                iter += 1
+                total_iteration += 1
+
+                #############################################################
+                # Pretrain Discriminator Network
+                #############################################################
+
+                self.discriminator.zero_grad()
+
+                # train with real
+                image_inputs.data.resize_(images.size()).copy_(images)
+                sentence_real = Variable(captions)
+                labels.data.resize_(labels.size()).fill_(self.real_label)
+
+                if self.num_gpu > 0:
+                    images = images.cuda()
+                    sentence_real = sentence_real.cuda()
+                    labels = labels.cuda()
+
+                torch.cuda.synchronize()
+                start = time.time()
+
+                logit = self.discriminator(images, sentence_real)
+                loss_real = self.criterion_D(logit)
+                loss_real.backward()
+
+                torch.cuda.synchronize()
+                end = time.time()
+
+                # train with fake
+                sentence_fake = self.generator.sample_reinforce(images, maxlen=20)
+                sentence_fake = sentence_fake.detach()
+
+                labels.data.fill_(self.fake_label)
+                if self.num_gpu > 0:
+                    sentence_fake = sentence_fake.cuda()
+                    labels = labels.cuda()
+
+                logit = self.discriminator(images, sentence_fake)
+                loss_fake = self.criterion_D(logit)
+                loss_fake.backward()
+                total_loss = loss_real + loss_fake
+
+                self.optimizerD.step()
+
+
+
+    def train_adversarial(self):
 
         total_iteration = self.infos.get('total_iter', 0)
         loaded_iteration = self.infos.get('iter', 0)
@@ -184,8 +443,6 @@ class Trainer(object):
                         with open(os.path.join(self.opt.expr_dir, 'infos' + '-best.pkl'), 'wb') as f:
                             pickle.dump(self.infos, f)
 
-class GAN_Trainer(object):
-    """ Gan"""
 
 if __name__ == '__main__':
 

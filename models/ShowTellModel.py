@@ -62,28 +62,18 @@ class ShowTellModel(nn.Module):
         self.num_layers = opt.num_layers
         self.ss_prob = 0.0
 
-        # Define encoder
-        self.resnet = models.resnet101(pretrained=True)
-        # Replace last layer with image embedding layer
-        self.resnet.fc = nn.Linear(self.resnet.fc.in_features, self.embed_size)
-        self.bn = nn.BatchNorm1d(self.embed_size, momentum=0.01)
-        self.finetune(allow=False)
-
         # Define decoder
         self.embedding = nn.Embedding(self.vocab_size, self.embed_size)
         self.lstm = nn.LSTM(self.embed_size, self.hidden_size, self.num_layers, batch_first=False)
         self.classifier = nn.Linear(self.hidden_size, self.vocab_size)
 
-    def forward(self, images, captions, seqlen, gt=True):
-        # images : [batch x 3 x 224 x 224]
-        # xt : [batch x embed_size], encode images with encoder,
-        xt = self.encoder(images)
-
+    def forward(self, features, captions, seqlen, gt=True):
+        # features : [batch x embed_size], encode images with encoder,
         # caption : [batch x seq x embed_size], embed captions with embeddings
         captions = self.embedding(captions)
-        state = self.init_hidden(xt.size(0))
+        state = self.init_hidden(features.size(0))
 
-        hidden, state = self.lstm(xt.unsqueeze(0), state)
+        hidden, state = self.lstm(features.unsqueeze(0), state)
         outputs = []
         # Loop for the sequence
         for t in range(seqlen):
@@ -96,14 +86,14 @@ class ShowTellModel(nn.Module):
         # outputs = torch.cat(outputs, 0)
         return outputs
 
-    def sample(self, images, maxlen=20):
+    def sample(self, features, maxlen=20):
 
-        xt = self.encoder(images)
-        state = self.init_hidden(xt.size(0))
+        batch_size = features.size(0)
+        state = self.init_hidden(batch_size)
 
-        hidden, state = self.lstm(xt.unsqueeze(0), state)
+        hidden, state = self.lstm(features.unsqueeze(0), state)
         outputs = []
-        word = Variable(torch.ones(images.size(0)).long()).cuda()
+        word = Variable(torch.ones(batch_size).long()).cuda()
         xt = self.embedding(word)
         for t in range(maxlen):
 
@@ -116,22 +106,37 @@ class ShowTellModel(nn.Module):
         generated_sentence = torch.cat(outputs, 1)
         return generated_sentence.squeeze()
 
+    def sample_reinforce(self, features, maxlen=20):
+
+        batch_size = features.size(0)
+        state = self.init_hidden(batch_size)
+
+        hidden, state = self.lstm(features.unsqueeze(0), state)
+        actions = []
+        word = Variable(torch.ones(batch_size).long()).cuda()
+        xt = self.embedding(word)
+        for t in range(maxlen):
+
+            hidden, state = self.lstm(xt.unsqueeze(0), state)
+            output = self.classifier(hidden.squeeze(0))
+            # Get a Stochastic Action (Stochastic Policy)
+            action = self.getStochasticAction(output)
+            actions.append(action)
+            xt = self.embedding(action.detach()).squeeze(1)
+
+        generated_sentence = torch.cat(actions, 1)
+        return generated_sentence.squeeze()
+
+    def getStochasticAction(self, output):
+        distribution = F.softmax(output)
+        action = distribution.multinomial()
+        return action
+
     def init_hidden(self, batch_size):
         weight = next(self.parameters()).data
         return (Variable(weight.new(self.num_layers, batch_size, self.hidden_size).zero_()),
                 Variable(weight.new(self.num_layers, batch_size, self.hidden_size).zero_()))
 
-    def encoder(self, images):
-        # Extract the image feature vectors
-        features = self.resnet(images)
-        features = self.bn(features)
-        return features
-
-    def finetune(self, allow=False):
-        for param in self.resnet.parameters():
-            param.requires_grad = True if allow else False
-        for param in self.resnet.fc.parameters():
-            param.requires_grad = True
 
 if __name__ == '__main__':
 

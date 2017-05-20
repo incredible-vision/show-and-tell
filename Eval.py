@@ -59,9 +59,9 @@ def language_eval(preds):
     return out
 
 def evaluation(model, crit, loader, vocab, opt):
-
-    model.eval()
-
+    encoder, generator = model
+    encoder.eval()
+    generator.eval()
     loss_sum = 0
     loss_evals = 0
     predictions = []
@@ -93,14 +93,19 @@ def evaluation(model, crit, loader, vocab, opt):
 
         targets = pack_padded_sequence(captions, lengths, batch_first=True)[0]
 
-        outputs, seqlen = model(images, captions)
+        # seqlen = self.seqlen if self.seqlen is not None else lengths[0]
+        # TODO: max_length options need to be added
+        seqlen = lengths[0]
+
+        features = encoder(images)
+        outputs = generator(features, captions, seqlen)
         outputs = convertOutputVariable(outputs, seqlen, lengths)
 
         loss = crit(outputs, targets)
         loss_sum = loss_sum + loss
         loss_evals = loss_evals + 1
 
-        sampled_ids = model.sample(images)
+        sampled_ids = generator.sample(features)
 
         sampled_ids = sampled_ids.cpu().data.numpy()
         result_sentences = []

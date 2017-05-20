@@ -3,3 +3,4 @@ data/*
 experiment/*
 pycocoevalcap/
 *.pyc
+cache

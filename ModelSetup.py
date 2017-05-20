@@ -11,6 +11,8 @@ import torch.nn as nn
 
 from models.ShowTellModel import ShowTellModel
 from models.ShowAttendTellModel import ShowAttendTellModel
+from models.Discriminator import Discriminator
+from models.Encoder import EncoderCNN, EncoderCNN_F
 
 def model_setup(opt, model_name):
 
@@ -22,6 +24,20 @@ def model_setup(opt, model_name):
         opt.load_pretrain = False
         opt.start_from = False
         model = ShowAttendTellModel(opt)
+    elif model_name == 'discriminator':
+        opt.load_pretrain = False
+        opt.start_from = False
+        model = Discriminator(opt)
+    elif model_name == 'cnn_encoder':
+        opt.load_pretrain = False
+        opt.start_from = False
+        opt.cnn_type = 'resnet'
+        opt.img_embed_size = 512
+        model = EncoderCNN(opt)
+    elif model_name == 'cnn_encoder_feature':
+        opt.load_pretrain = False
+        opt.start_from = False
+        model = EncoderCNN_F(opt)
     else:
         raise Exception("Caption model not supported: {}".format(opt.model_name))
 
