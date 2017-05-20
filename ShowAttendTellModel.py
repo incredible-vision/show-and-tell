@@ -42,7 +42,7 @@ class LSTMCustom(nn.Module):
         c = f_gate * c + i_gate * F.tanh(self.W_cx(xt) + self.W_ch(h))
         h = o_gate * c
 
-        return h, (h, c)
+        return h, c
 
 class ShowAttendTellModel(nn.Module):
     """"" Implementation of Show and Tell Model for Image Captioning """""
@@ -78,6 +78,9 @@ class ShowAttendTellModel(nn.Module):
         self.out_weight = nn.Linear(self.hidden_size,self.hidden_size)
         self.init_weight()
 
+        self.init_hidden = nn.Linear(2*self.hidden_size, self.hidden_size, bias=True)
+        self.init_memory = nn.Linear(2*self.hidden_size, self.hidden_size, bias=True)
+
     def forward(self, images, captions, maxlen=None, gt=True):
         # images : [batch x 3 x 224 x 224]
         # xt : [batch x embed_size], encode images with encoder,
@@ -86,11 +89,12 @@ class ShowAttendTellModel(nn.Module):
         context_encode = torch.bmm(xt, self.image_att_w.unsqueeze(0).expand(xt.size(0), self.image_att_w.size(0), self.image_att_w.size(1)))  # [batch, 196, 512]
         # caption : [batch x seq x embed_size], embed captions with embeddings
         captions = self.embedding(captions)
-        state = self.init_hidden(xt.size(0))
+        #state = self.init_hidden(xt.size(0))
+        hidden, state = self.init_lstm(xt.mean(1).squeeze(1))
         # Sequence Length, we can manually designate maximum sequence length
         # or get maximum sequence length in ground truth captions
         seqlen = maxlen if maxlen is not None else captions.data.size(1)
-        hidden, state = self.lstm(xt.mean(1).squeeze(1).unsqueeze(0), state)
+        #hidden, state = self.lstm(xt.mean(1).squeeze(1).unsqueeze(0), state)
 
         alpha_list = []
         hiddens = []
@@ -103,10 +107,10 @@ class ShowAttendTellModel(nn.Module):
             rnn_cat = torch.cat([context, embedding], dim=1)
             hidden, state = self.lstm(rnn_cat.unsqueeze(0), state)
             output = self.output_layer(context, hidden)
-
             alpha_list.append(alpha)
             outputs.append(output)
             hiddens.append(hidden)
+            hidden = torch.squeeze(hidden)
         return outputs, seqlen
 
 
@@ -119,6 +123,10 @@ class ShowAttendTellModel(nn.Module):
         init.constant(self.weight_hh.bias.data, val=0)
         init.xavier_normal(self.out_weight.weight.data, gain=np.sqrt(2.0))
         init.constant(self.out_weight.bias.data, val=0)
+        #init.xavier_normal(self.init_hidden.weight.data, gain=np.sqrt(2.0))
+        #init.constant(self.init_hidden.bias.data, val=0)
+        #init.xavier_normal(self.init_memory.weight.data, gain=np.sqrt(2.0))
+        #init.constant(self.init_memory.bias.data, val=0)
         init.xavier_normal(self.weight_ctc.data, gain=np.sqrt(2.0))
         init.xavier_normal(self.image_att_w.data, gain=np.sqrt(2.0))
         init.xavier_normal(self.weight_att.data, gain=np.sqrt(2.0))
@@ -137,6 +145,11 @@ class ShowAttendTellModel(nn.Module):
         out = self.classifier(F.tanh(out))
         return out
 
+    def init_lstm(self, features):
+        hidden = (self.init_hidden(features)).unsqueeze(0)
+        c = (self.init_memory(features)).unsqueeze(0)
+        return hidden, (hidden, c)
+
     def sample(self, images, maxlen=20):
         start_word = torch.ones(images.size(0))
         embeddings = self.embedding(Variable(start_word.long()).cuda())
@@ -145,8 +158,9 @@ class ShowAttendTellModel(nn.Module):
         xt = self.encoder(images)  # [batch, 1024, 14, 14]
         xt = xt.view(xt.size(0), xt.size(1), -1).transpose(2, 1)  # [batch, 196, 1024]
         context_encode = torch.bmm(xt, self.image_att_w.unsqueeze(0).expand(xt.size(0), self.image_att_w.size(0), self.image_att_w.size(1)))  # [batch, 196, 512]
-        state = self.init_hidden(xt.size(0))
-        hidden, state = self.lstm(xt.mean(1).squeeze(1).unsqueeze(0), state)
+        #state = self.init_hidden(xt.size(0))
+        #hidden, state = self.lstm(xt.mean(1).squeeze(1).unsqueeze(0), state)
+        hidden, state = self.init_lstm(xt.mean(1).squeeze(1))
         outputs = []
 
         for t in range(maxlen):
@@ -163,10 +177,10 @@ class ShowAttendTellModel(nn.Module):
         generated_sentence = torch.cat(outputs, 1)
         return generated_sentence.squeeze()
 
-    def init_hidden(self, batch_size):
-        weight = next(self.parameters()).data
-        return (Variable(weight.new(self.num_layers, batch_size, self.hidden_size).zero_()),
-                Variable(weight.new(self.num_layers, batch_size, self.hidden_size).zero_()))
+    #def init_hidden(self, batch_size):
+    #    weight = next(self.parameters()).data
+    #    return (Variable(weight.new(self.num_layers, batch_size, self.hidden_size).zero_()),
+    #            Variable(weight.new(self.num_layers, batch_size, self.hidden_size).zero_()))
 
     def encoder(self, images):
         # Extract the image feature vectors
