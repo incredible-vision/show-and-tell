@@ -14,7 +14,7 @@ from torchvision import transforms
 
 from DataLoader import get_loader
 from Utils import Vocabulary, visualize_loss
-from ModelSetup import model_setup
+from ModelSetup import model_setup, model_setup_2
 
 from Eval import evaluation
 from Eval_SPIDEr import evaluationPolicyGradient, language_eval
@@ -22,6 +22,7 @@ from Eval_SPIDEr import evaluationPolicyGradient, language_eval
 #from models.models1 import EncoderCNN, DecoderRNN, DecoderPolicyGradient
 #from models.models2 import ShowAttendTellModel_XE #, ShowAttendTellModel_PG
 #from models.models2 import ShowAttendTellModel_G, ShowAttendTellModel_D
+
 
 class Trainer(object):
     def __init__(self, opt, trainloader, validloader):
@@ -489,9 +490,11 @@ class Trainer_PG(object):
                 torch.save(self.decoderPolicyGradient.state_dict(), os.path.join('models/', 'REINFORCE-decoderPolicyGradient-epoch%d.pkl' % (epoch)))
 
 
+# Training using GAN + PG testing...
 class Trainer_GAN(object):
     def __init__(self, opt, trainloader, validloader):
         self.opt = opt
+        self.num_gpu = opt.num_gpu
 
         self.total_train_iter = len(trainloader)
         self.total_valid_iter = len(validloader)
@@ -499,34 +502,19 @@ class Trainer_GAN(object):
         self.trainloader = trainloader
         self.validloader = validloader
 
-        self.num_gpu = opt.num_gpu
-        self.load_model_path = opt.load_model_path
-        self.load_optimizer_path = opt.load_optim_path
+        self.train_loss_win = None
+        self.train_perp_win = None
 
         with open(opt.vocab_path, 'rb') as f:
             self.vocab = pickle.load(f)
+            opt.vocab_size = len(self.vocab)
 
-        self.model_G = ShowAttendTellModel_G(opt.hidden_size, opt.embed_size, len(self.vocab), opt.embed_size, opt)
-        self.model_D = ShowAttendTellModel_D(opt.hidden_size, opt.embed_size, len(self.vocab), opt.embed_size, opt)
+        (self.model_G, self.model_D), self.infos = model_setup_2(opt, model_name='ShowAttendTellModel_GAN')
 
-        if self.num_gpu == 1:
-            self.model_G.cuda()
-            self.model_D.cuda()
-
-        elif self.num_gpu > 1:
-            self.model_G = nn.DataParallel(self.model_G.cuda(), device_ids=range(self.num_gpu))
-            self.model_D = nn.DataParallel(self.model_D.cuda(), device_ids=range(self.num_gpu))
-
-        if self.opt.load_pretrained:
-            if self.load_model_path:
-                self.load_model()
-                print('pretrained model loaded')
-
-            if self.load_optimizer_path:
-                self.load_optimizer()
+        self.max_length = 20
 
         """ This criterion combines LogSoftMax and NLLLoss in one single class """
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = nn.BCELoss(size_average=True)
 
         """ only update trainable parameters """
         G_parameters = filter(lambda p: p.requires_grad, self.model_G.parameters())
@@ -534,33 +522,30 @@ class Trainer_GAN(object):
         self.G_optimizer = optim.Adam(G_parameters, lr=opt.learning_rate)
         self.D_optimizer = optim.Adam(D_parameters, lr=opt.learning_rate)
 
+        if opt.start_from :
+            self.optimizer.load_state_dict(torch.load(os.path.join(self.opt.expr_dir, 'optimizer.pth')))
+
         print('done')
 
-    def load_model(self):
-        return self.model.load_state_dict(torch.load(os.path.join(self.opt.expr_dir, 'model-best.pth')))
-
-    def load_optimizer(self):
-        return self.optimizer.load_state_dict(torch.load(os.path.join(self.opt.expr_dir, 'optimizer.pth')))
 
     def train(self):
 
-        infos = {}
-
-        if self.opt.start_from is not None and not self.opt.load_pretrained:
-            # open old infos and check if models are compatible
-            with open(os.path.join(self.opt.expr_dir, 'infos' + '.pkl')) as f:
-                infos = pickle.load(f)
-
-        total_iteration = infos.get('total_iter', 0)
-        loaded_iteration = infos.get('iter', 0)
-        loaded_epoch = infos.get('epoch', 1)
-        val_result_history = infos.get('val_result_history', {})
-        loss_history = infos.get('loss_history', {})
-        lr_history = infos.get('lr_history', {})
+        total_iteration = self.infos.get('total_iter', 0)
+        loaded_iteration = self.infos.get('iter', 0)
+        loaded_epoch = self.infos.get('epoch', 0)
+        val_result_history = self.infos.get('val_result_history', {})
+        loss_history = self.infos.get('loss_history', {})
+        lr_history = self.infos.get('lr_history', {})
+        train_loss_history = self.infos.get('train_loss_history', {})
 
         # loading a best validation score
         if self.opt.load_best_score == True:
-            best_val_score = infos.get('best_val_score', None)
+            best_val_score = self.infos.get('best_val_score', None)
+
+        def convertOutputVariable(outputs, maxlen, lengths):
+            outputs = torch.cat(outputs, 1).view(len(lengths), maxlen, -1)
+            outputs = pack_padded_sequence(outputs, lengths, batch_first=True)[0]
+            return outputs
 
         def clip_gradient(optimizer, grad_clip):
             for group in optimizer.param_groups:
@@ -571,10 +556,10 @@ class Trainer_GAN(object):
             for group in optimizer.param_groups:
                 group['lr'] = lr
 
+        for epoch in range(loaded_epoch + 1, 1 + self.opt.max_epochs):
 
-        for epoch in range(1, 1 + self.opt.max_epochs):
+            if epoch > self.opt.learning_rate_decay_start >= 1:
 
-            if epoch > self.opt.learning_rate_decay_start and self.opt.learning_rate_decay_start >= 1:
                 fraction = (epoch - self.opt.learning_rate_decay_start) // self.opt.learning_rate_decay_every
                 decay_factor = self.opt.learning_rate_decay_rate ** fraction
                 self.opt.current_lr = self.opt.learning_rate * decay_factor
@@ -582,9 +567,10 @@ class Trainer_GAN(object):
             else:
                 self.opt.current_lr = self.opt.learning_rate
 
-            if epoch < loaded_epoch: continue
+            self.model_D.train()
+            self.model_G.train()
 
-            for iter, (images, captions, lengths, cocoids, imgids) in enumerate(self.trainloader):
+            for iter, (images, captions, lengths, cocoids) in enumerate(self.trainloader):
 
                 iter += 1
                 total_iteration += 1
@@ -599,56 +585,71 @@ class Trainer_GAN(object):
                 lengths = [l-1 for l in lengths]
                 targets = pack_padded_sequence(captions[:,1:], lengths, batch_first=True)[0]
 
-                ############################
-                # (1) Update D network:
-                ###########################
+                ################################################
+                # (1) Update D network
+                # : (1-1) Fake sentence (1-2) Real sentence
+                ################################################
+
                 self.model_D.zero_grad()
-                f_sentences_, f_sentences = self.model_G.sample(images)
-                r_sentences = self.model_G.gt_sentences(captions, lengths)
+                f_sentences, f_sentences_word_emb = self.model_G.sample(images) # ([128,1] x20)/ ([128,512]x20)
+
+                r_sentences, r_sentences_word_emb = self.model_G.gt_sentences(captions) # ([128,1] x20)/ ([128,512]x20)
 
                 f_label, r_label = Variable(torch.FloatTensor(self.opt.batch_size).cuda()), Variable(torch.FloatTensor(self.opt.batch_size).cuda())
-                f_label.data.resize_(self.opt.batch_size).fill(0)
-                r_label.data.resize_(self.opt.batch_size).fill(1)
+                f_label.data.resize_(self.opt.batch_size).fill_(0)
+                r_label.data.resize_(self.opt.batch_size).fill_(1)
 
-                f_output = self.model_D(f_sentences.detach())
-                f_error = self.criterion(f_output, f_label)
+                f_D_output = self.model_D(f_sentences_word_emb)
+                f_error = self.criterion(f_D_output, f_label)
                 f_error.backward()
 
-                r_output = self.model_D(r_sentences)
-                r_error = self.criterion(r_output, r_label)
+                r_D_output = self.model_D(r_sentences_word_emb)
+                r_error = self.criterion(r_D_output, r_label)
                 r_error.backward()
 
                 D_error = f_error + r_error
                 self.D_optimizer.step()
 
-                ############################
-                # (2) Update G network: maximize log(D(G(z)))
-                ###########################
+                ################################################
+                # (2) Update G network:
+                ################################################
 
                 self.model_G.zero_grad()
-                '3: f_sentences, actions = self.model_G.sample(images)'
+                f_outputs, f_outputs_actions, f_outputs_emb, _ = self.model_G(images, captions)
+
                 f_label = Variable(torch.FloatTensor(self.opt.batch_size).cuda())
-                f_label = f_label.data.resize_(self.opt.batch_size).fill(1)
+                f_label.data.resize_(self.opt.batch_size).fill_(1)
 
-                output = self.model_D(f_sentences.detach())
-                G_error_rewards = self.criterion(output, f_label)
+                f_D_output = self.model_D(f_outputs_emb)
+                G_error_rewards = self.criterion(f_D_output, f_label)
 
-                '4)for action, r in zip(actions, G_error_rewards):'
-                '   action.reinforce(r)'
+                # if use PG (reinforce)
+                #for action, r in zip(f_outputs_actions, G_error_rewards):
+                #  #action.reinforce(r)
 
-                autograd.backward(actions, [None for _ in actions])
-                self.optimizer_G.step()
+                reward = float(G_error_rewards.data.cpu().numpy()[0])
+                reward = 1.0/reward
+                for action in f_outputs_actions: # for each batch allocate reward.??!?!..... how????????!?!?!??!
+                    action.reinforce(reward)
 
-                # Forward, Backward
+                torch.autograd.backward(f_outputs_actions, [None for _ in f_outputs_actions])
+                self.G_optimizer.step()
+
                 torch.cuda.synchronize()
 
+                # if use Gumbel softmax
+                # blah blah..
+
+
                 if iter % self.opt.log_step == 0:
-                    print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f D(x): %.4f'
-                          .format(epoch, self.opt.max_epochs, iter, len(self.trainloader), D_error.data[0], G_error.data[0]))
+                    print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f'
+                          % (epoch, self.opt.max_epochs, iter, len(self.trainloader), D_error.data[0], reward))
+                    train_loss_history[total_iteration] = {'loss': reward}
+                    self.train_loss_win = visualize_loss(self.train_loss_win, train_loss_history, 'train_loss', 'loss')
 
                 # make evaluation on validation set, and save model
                 if (total_iteration % self.opt.save_checkpoint_every == 0):
-                    val_loss, predictions, lang_stats = evaluation(self.model, self.criterion,
+                    val_loss, predictions, lang_stats = evaluation(self.model_G, self.criterion,
                                                                    self.validloader, self.vocab, self.opt)
                     val_result_history[total_iteration] = {'loss': val_loss, 'lang_stats': lang_stats,
                                                            'predictions': predictions}
@@ -669,30 +670,40 @@ class Trainer_GAN(object):
                         best_val_score = current_score
                         best_flag = True
 
-                    checkpoint_path = os.path.join(self.opt.expr_dir, 'model.pth')
-                    torch.save(self.model.state_dict(), checkpoint_path)
+                    checkpoint_path = os.path.join(self.opt.expr_dir, 'model_G.pth')
+                    torch.save(self.model_G.state_dict(), checkpoint_path)
+                    checkpoint_path = os.path.join(self.opt.expr_dir, 'model_D.pth')
+                    torch.save(self.model_D.state_dict(), checkpoint_path)
+
                     print("model saved to {}".format(checkpoint_path))
-                    optimizer_path = os.path.join(self.opt.expr_dir, 'optimizer.pth')
-                    torch.save(self.optimizer.state_dict(), optimizer_path)
+                    optimizer_path = os.path.join(self.opt.expr_dir, 'optimizer_G.pth')
+                    torch.save(self.G_optimizer.state_dict(), optimizer_path)
+                    optimizer_path = os.path.join(self.opt.expr_dir, 'optimizer_D.pth')
+                    torch.save(self.D_optimizer.state_dict(), optimizer_path)
 
                     # Dump miscalleous informations
-                    infos['total_iter'] = total_iteration
-                    infos['iter'] = iter
-                    infos['epoch'] = epoch
-                    infos['best_val_score'] = best_val_score
-                    infos['opt'] = self.opt
-                    infos['val_result_history'] = val_result_history
-                    infos['loss_history'] = loss_history
-                    infos['lr_history'] = lr_history
+                    self.infos['total_iter'] = total_iteration
+                    self.infos['iter'] = iter
+                    self.infos['epoch'] = epoch
+                    self.infos['best_val_score'] = best_val_score
+                    self.infos['opt'] = self.opt
+                    self.infos['val_result_history'] = val_result_history
+                    self.infos['loss_history'] = loss_history
+                    self.infos['lr_history'] = lr_history
+                    self.infos['train_loss_history'] = train_loss_history
                     with open(os.path.join(self.opt.expr_dir, 'infos' + '.pkl'), 'wb') as f:
-                        pickle.dump(infos, f)
+                        pickle.dump(self.infos, f)
 
                     if best_flag:
-                        checkpoint_path = os.path.join(self.opt.expr_dir, 'model-best.pth')
-                        torch.save(self.model.state_dict(), checkpoint_path)
+                        checkpoint_path = os.path.join(self.opt.expr_dir, 'model-best-G.pth')
+                        torch.save(self.model_G.state_dict(), checkpoint_path)
+                        checkpoint_path = os.path.join(self.opt.expr_dir, 'model-best-D.pth')
+                        torch.save(self.model_D.state_dict(), checkpoint_path)
+
                         print("model saved to {}".format(self.opt.expr_dir))
+
                         with open(os.path.join(self.opt.expr_dir, 'infos' + '-best.pkl'), 'wb') as f:
-                            pickle.dump(infos, f)
+                            pickle.dump(self.infos, f)
 
 
 if __name__ == '__main__':

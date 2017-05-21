@@ -5,6 +5,7 @@ import string
 import os
 import pickle
 import numpy as np
+import copy
 
 sys.path.append("coco-caption")
 from pycocotools.coco import COCO
@@ -50,6 +51,7 @@ class LSTMCustom(nn.Module):
         h = o_gate * c
 
         return h, (h, c)
+
 
 class ShowAttendTellModel_XE(nn.Module):
     """"" Implementation of Show and Tell Model for Image Captioning """""
@@ -362,200 +364,189 @@ class ShowAttendTellModel_PG(nn.Module):
 # test
 class ShowAttendTellModel_G(nn.Module):
 
-    def __init__(self, hidden_size, context_size, vocab_size, embed_size, opt, feature_size=[196, 512]):
-        #                  1024         512         len()        512         vgg:[196,512] res50:[196,1024]
+    def __init__(self, opt):
+
         super(ShowAttendTellModel_G, self).__init__()
-        """ define encoder, use resnet50 for reproducing """
+        # Load hyper-parameters
         self.opt = opt
-        self.encoder = vgg16(pretrained=True)
-        self.encoder = nn.Sequential(*list(self.encoder.features)[:-3])
+        self.vocab_size = opt.vocab_size
+        self.embed_size = opt.embed_size
+        self.hidden_size = opt.hidden_size
+        self.num_layers = opt.num_layers
+        self.ss_prob = 0.0
+
+        # Define encoder
+        self.resnet = models.resnet101(pretrained=True)
+        # Replace last layer with image embedding layer
+        self.resnet.fc = nn.Linear(self.resnet.fc.in_features, self.embed_size)
+        self.bn = nn.BatchNorm1d(self.embed_size, momentum=0.01)
         self.finetune(allow=False)
 
-        """ define weight parameters """
-        self.image_att_w = nn.Parameter(torch.FloatTensor(feature_size[1], feature_size[1])) # 512x512
-        self.init_hidden = nn.Linear(feature_size[1], hidden_size, bias=True)                # 512x1024
-        self.init_memory = nn.Linear(feature_size[1], hidden_size, bias=True)                # 512x1024
+        # Define decoder
+        self.embedding = nn.Embedding(self.vocab_size, self.embed_size)
+        self.lstm = nn.LSTM(self.embed_size, self.hidden_size, self.num_layers, batch_first=False)
+        self.classifier = nn.Linear(self.hidden_size, self.vocab_size)
 
-        self.weight_hh = nn.Linear(hidden_size, context_size)                                # 1024x512
-        self.weight_att = nn.Parameter(torch.FloatTensor(feature_size[1], 1))                # 512x1
-
-        """ define decoder, use lstm cell for reproducing """
-        self.embedding = nn.Embedding(vocab_size, embed_size)                                # 8000x512
-        self.lstmcell = nn.LSTMCell(hidden_size, hidden_size)                                # 512, 512
-
-        """ define classifier """
-        self.context2out = nn.Linear(context_size, embed_size)                               # 512x512
-        self.hidden2tout = nn.Linear(hidden_size, embed_size)                                # 1024x512
-        self.dropout = nn.Dropout(p=0.5)
-
-        self.classifier = nn.Linear(embed_size, vocab_size)                                  # 512x8000
-        self.init_weight()
+        self.max_length = 20
 
         annFile = '/home/gt/D_Data/COCO/annotations_captions/captions_val2014.json'
         self.coco = COCO(annFile)
 
+    def forward(self, images, captions, maxlen=None):
+        # images : [batch x 3 x 224 x 224]
 
-    def forward(self, images, captions, lengths):
+        xt = self.encoder(images) # xt : [batch x embed_size], encode images with encoder,
 
-        embeddings = self.embedding(captions)
-        packed, batch_sizes = pack_padded_sequence(embeddings, lengths, batch_first=True)
-        """ put input data through cnn """
-        features = self.encoder(images) # [batch, 512, 14, 14]
-        features = features.view(features.size(0), features.size(1), -1).transpose(2, 1) # [batch, 196, 512]
-        context_encode = torch.bmm(features, self.image_att_w.unsqueeze(0).expand(features.size(0), self.image_att_w.size(0), self.image_att_w.size(1))) # [batch, 196, 512]
+        captions = self.embedding(captions) # caption : [batch x seq x embed_size], embed captions with embeddings
+        state = self.init_hidden(xt.size(0))
 
-        """ initialize hidden and memory unit"""
-        hidden, c = self.init_lstm(features)
+        seqlen = maxlen if maxlen is not None else captions.data.size(1)
+
+        hidden, state = self.lstm(xt.unsqueeze(0), state)
+
         outputs = []
+        outputs_action = []
+        outputs_embedding = []
 
-        for t, batch_size in enumerate(batch_sizes):
-            embedding = embeddings[:batch_size, t, :]
-            context, _ = self.attention_layer(features[:batch_size], context_encode[:batch_size], hidden[:batch_size])
-
-            rnn_input = torch.cat([embedding, context], dim=1)
-            hidden, c = self.lstmcell(rnn_input, (hidden[:batch_size], c[:batch_size]))
-            output = self.output_layer(context, hidden)
+        # Loop for the sequence
+        for t in range(seqlen):
+            # One step over lstm cell
+            xt = captions[:, t, :]
+            hidden, state = self.lstm(xt.unsqueeze(0), state)
+            output = self.classifier(hidden.squeeze(0))
 
             outputs.append(output)
 
-        outputs = torch.cat(outputs, dim=0)
-        return outputs
+            action = output.multinomial()
+            outputs_action.append(action)
 
-    def attention_layer(self, features, context_encode, hidden):
-        h_att = F.tanh(context_encode + self.weight_hh(hidden).unsqueeze(1).expand_as(context_encode))
-        out_att = torch.bmm(h_att, self.weight_att.unsqueeze(0).expand(h_att.size(0), self.weight_att.size(0), self.weight_att.size(1))).squeeze(2)
-        alpha = F.softmax(out_att)
-        context = (features * alpha.unsqueeze(2).expand_as(features)).mean(1).squeeze(1)
-        return context, alpha
+            action_emb = self.embedding(action).squeeze(1)
+            outputs_embedding.append(action_emb)
 
-    def output_layer(self, context, hidden, prev=None):
-        context = self.context2out(context)
-        hidden = self.hidden2tout(hidden)
-        out = self.dropout(F.tanh(context+hidden))
-        out = self.classifier(out)
-        return out
+        outputs_embedding = self.pad_outputs_to_maxlen(captions, outputs_embedding, max_length=20)
+        # [20x(128,10000)], [20x(64,1)],   [20,(64,512)]                      20
+        return outputs, outputs_action, outputs_embedding[:self.max_length], seqlen
 
 
-    def init_weight(self):
-        """"""
-        """ initialize weight parameters """
-        init.uniform(self.embedding.weight, a=-1.0, b=1.0)
-        init.xavier_normal(self.image_att_w.data, gain=np.sqrt(2.0))
-        init.xavier_normal(self.init_hidden.weight.data, gain=np.sqrt(2.0))
-        init.constant(self.init_hidden.bias.data, val=0)
-        init.xavier_normal(self.init_memory.weight.data, gain=np.sqrt(2.0))
-        init.constant(self.init_memory.bias.data, val=0)
-        init.xavier_normal(self.hidden2tout.weight.data, gain=np.sqrt(2.0))
-        init.constant(self.hidden2tout.bias.data, val=0)
-        init.xavier_normal(self.context2out.weight.data, gain=np.sqrt(2.0))
-        init.constant(self.context2out.bias.data, val=0)
-        init.xavier_normal(self.weight_att.data, gain=np.sqrt(2.0))
-        init.xavier_normal(self.weight_hh.weight.data, gain=np.sqrt(2.0))
-        init.constant(self.weight_hh.bias.data, val=0)
-        init.xavier_normal(self.classifier.weight.data, gain=np.sqrt(2.0))
-        init.constant(self.classifier.bias.data, val=0)
-        init.xavier_normal(self.lstmcell.weight_hh.data, gain=np.sqrt(2.0))
-        init.xavier_normal(self.lstmcell.weight_ih.data, gain=np.sqrt(2.0))
-        init.constant(self.lstmcell.bias_hh.data, val=0)
-        init.constant(self.lstmcell.bias_ih.data, val=0)
+    def pad_outputs_to_maxlen(self, captions, outputs_embedding, max_length=20):
+        # input : captions(batch, lengths)
+        batch_size = captions.size(0)
+        max_batch_length = captions.size(1)
 
-    def init_lstm(self, features):
-        features_mean = features.mean(1).squeeze(1)
-        h = self.init_hidden(features_mean)
-        c = self.init_memory(features_mean)
-        return h, c
+        for i in range(max_length - max_batch_length):
+            temp = self.embedding(Variable(torch.LongTensor(batch_size).zero_()).cuda())
+            outputs_embedding.append(temp)
+
+        return outputs_embedding
+
+
+    def init_hidden(self, batch_size):
+        weight = next(self.parameters()).data
+        return (Variable(weight.new(self.num_layers, batch_size, self.hidden_size).zero_()),
+                Variable(weight.new(self.num_layers, batch_size, self.hidden_size).zero_()))
+
+    def encoder(self, images):
+        # Extract the image feature vectors
+        features = self.resnet(images)
+        features = self.bn(features)
+        return features
 
     def finetune(self, allow=False):
-        for param in self.encoder.parameters():
+        for param in self.resnet.parameters():
             param.requires_grad = True if allow else False
+        for param in self.resnet.fc.parameters():
+            param.requires_grad = True
 
-    def sample(self, images):
-        """"""
-        start_word = torch.ones(images.size(0))
-        embeddings = self.embedding(Variable(start_word.long()).cuda())
-        """Samples captions for given image features (Greedy search)."""
-        sampled_ids = []
-        embedding_save = []
+    def sample(self, images, max_length=20):
+        xt = self.encoder(images)
+        state = self.init_hidden(xt.size(0))
 
-        features = self.encoder(images)  # [batch, 512, 14, 14]
-        features = features.view(features.size(0), features.size(1), -1).transpose(2, 1)  # [batch, 196, 512]
-        context_encode = torch.bmm(features, self.image_att_w.unsqueeze(0).expand(features.size(0), self.image_att_w.size(0), self.image_att_w.size(1)))  # [batch, 196, 512]
-        hidden, c = self.init_lstm(features)
+        hidden, state = self.lstm(xt.unsqueeze(0), state)
+        outputs_greedy = []
+        outputs_multinomial = []
+        outputs_embedding = []
+        word = Variable(torch.ones(images.size(0)).long()).cuda()
+        xt = self.embedding(word)
 
-        for i in range(20):  # maximum sampling length
-            context, alpha = self.attention_layer(features, context_encode, hidden)
-            if i == 0:
-                rnn_input = torch.cat([embeddings, context], dim=1)
-            hidden, c = self.lstmcell(rnn_input, (hidden, c))  # (batch_size, 1, hidden_size)
-            outputs = self.output_layer(context, hidden)  # (batch_size, vocab_size)
+        for t in range(max_length):
+            hidden, state = self.lstm(xt.unsqueeze(0), state)
+            output = self.classifier(hidden.squeeze(0))
 
             # # Option 1 : Greedy search
-            #predicted_greedy = outputs.max(1)[1]
-            #sampled_ids.append(predicted_greedy)
-            #embedding = self.embedding(predicted_greedy).squeeze(1)
+            #predicted_greedy = output.max(1)[1]
+            #outputs_greedy.append(predicted_greedy)
+            #xt = self.embedding(predicted_greedy).squeeze(1)
+            #saved_embedding.append(xt)
 
             # Option 2 : Multinomal search
-            predicted_multinomial = outputs.multinomial()
-            sampled_ids.append(predicted_multinomial)
-            embedding = self.embedding(predicted_multinomial).squeeze(1)
-            embedding_save.append(embedding)
+            predicted_multinomial = output.multinomial()
+            outputs_multinomial.append(predicted_multinomial)
+            xt = self.embedding(predicted_multinomial).squeeze(1)
+            outputs_embedding.append(xt.detach())
+            #outputs_embedding.append(xt)
 
-            rnn_input = torch.cat([embedding, context], dim=1)
-
-        sampled_ids = torch.cat(sampled_ids, 1)  # (batch_size, 20)
-        embedding_save = torch.cat(embedding_save, 1) # batch, 512*20
-
-        return sampled_ids.squeeze(), embedding_save.view(self.opt.batch_size, 512, 20)
-
-    def gt_sentences(self, captions, lengths):
-
-        r_sentences=[]
-
-        for i in range(len(captions)):
-
-            captions[i]
+        return outputs_multinomial, outputs_embedding
 
 
-            r_sentences.append(gt_)
+    def gt_sentences(self, captions):
+        # input : captions(batch, lengths)
+        batch_size = captions.size(0)
+        max_batch_length = captions.size(1)
 
-        return r_sentences
+        if self.max_length <= max_batch_length: # if: max_batch_length >= 20
+            _gt_sentences = captions
+        else:                                   # else: padd 0 to length 20
+            temp = Variable(torch.LongTensor(batch_size, self.max_length - max_batch_length).zero_()).cuda()
+            _gt_sentences = torch.cat((captions, temp), 1)
 
-    def gumbel_sampler(self, input, tau, temperature):
-        noise = torch.rand(input.size())
-        noise.add_(1e-9).log_().neg_()
-        noise.add_(1e-9).log_().neg_()
-        noise = Variable(noise)
-        x = (input + noise) / tau + temperature
-        x = F.softmax(x.view(input.size(0), -1))
-        return x.view_as(input)
+        gt_sentences_embedding = torch.transpose(self.embedding(_gt_sentences), 0, 1)
+        gt_sentences_embedding = [t.squeeze(0) for t in gt_sentences_embedding]
+
+        gt_sentences = torch.transpose(_gt_sentences, 0, 1)
+        gt_sentences = [t.unsqueeze(1) for t in gt_sentences]
+
+        return gt_sentences[:self.max_length], gt_sentences_embedding[:self.max_length]   # [[B x Emb] x L]
+
 
 
 class ShowAttendTellModel_D(nn.Module):
 
-    def __init__(self, hidden_size, context_size, vocab_size, embed_size, opt, feature_size=[196, 512]):
+    def __init__(self, opt):
         super(ShowAttendTellModel_D, self).__init__()
         self.opt = opt
-        self.net_D = nn.Sequential(nn.Linear(self.opt.embed_size, self.opt.embed_size),
+        self.net_D = nn.Sequential(nn.Linear(self.opt.embed_size*2, self.opt.embed_size),
                                    nn.ReLU(),
-                                   nn.Linear(self.opt.embed_size, 2))
+                                   nn.Linear(self.opt.embed_size, 1))
 
-        self.bi_lstm = nn.LSTM(input_size=hidden_size, hidden_size=hidden_size, bias=True, batch_first=True, bidirectional=True)
-        self.W_s1 = nn.Linear(256, 1024)
-        self.W_s2 = nn.Linear(1, 256)
+        self.bi_lstm = nn.LSTM(input_size=self.opt.hidden_size, hidden_size=self.opt.hidden_size, bias=True,
+                               batch_first=True, bidirectional=True)
+        self.W_s1 = nn.Linear(1024, 512)
+        self.W_s2 = nn.Linear(512, 1)
 
     def forward(self, input):
             embedding = self.self_attentive_sentence_embedding(input)
-            return self.net_D(embedding)
+            return F.sigmoid(self.net_D(embedding))
 
-    def self_attentive_sentence_embedding(self, input, I):
-        # timesteps, batch, hidden_size // 20, 128, 512x2
-        output, hn = self.bi_lstm(input)
-        H = torch.transpose(hn, 0, 1) # hn = 20, 128, 512x2 -> 128, 20, 512x2
-        H_t = torch.transpose(H, 1, 2) # hn = 128, 20, 512x2 -> 128, 512x2, 20
-        temp = F.tanh(self.W_s1(H_t)) # temp = 128, 256, 20
-        temp = self.W_s2(temp) # temp = 128, 1,20
-        a = F.softmax(temp) # a = 128, 1,20
+    def self_attentive_sentence_embedding(self, input):
 
-        embedding = a * H
+        input = [i.unsqueeze(0) for i in input] # [20 x (1, 128, 512)]
+        input = torch.cat(input, 0)             # [20, 128, 512]
 
-        return embedding # 128, 256
+        output, hn = self.bi_lstm(input) # [20, 128, 512x2]
+
+        output = torch.transpose(output, 0, 1) # [128, 20, 512x2]
+        H_ = torch.cat(output, 0)              # [128x20, 1024]
+
+        temp = self.W_s1(H_)   # temp = 128x20, 512
+        temp = F.tanh(temp)    # temp = 128x20, 512
+        temp = self.W_s2(temp) # temp = 128x20, 1
+
+        temp = temp.view(self.opt.batch_size, 20) # temp = 128, 20
+        attention = F.softmax(temp)               # attention = 128, 20
+
+        attention = attention.unsqueeze(2).repeat(1,1, self.opt.embed_size*2) # attention = 128, 20, 1024
+
+        embedding = attention * output            # embedding = 128, 20, 1024
+        embedding = torch.sum(embedding, dim=1)   # embedding = 128, 1, 1024
+
+        return embedding.squeeze(1)               # embedding = 128, 1024

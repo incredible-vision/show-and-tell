@@ -43,9 +43,9 @@ def main(opt):
     print('load the dataset into memory...')
     print('total iterations in training phase : {} \ntotal iterations in validation phase : {}'.format(len(train_dataloader), len(valid_dataloader)))
 
-    trainer = Trainer(opt, train_dataloader, valid_dataloader)
+    #trainer = Trainer(opt, train_dataloader, valid_dataloader)
     #trainer = Trainer_PG(opt, train_dataloader, valid_dataloader)
-    #trainer = Trainer_GAN(opt, train_dataloader, valid_dataloader)
+    trainer = Trainer_GAN(opt, train_dataloader, valid_dataloader)
 
     trainer.train()
     print('done')

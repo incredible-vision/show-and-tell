@@ -93,7 +93,8 @@ def evaluation(model, crit, loader, vocab, opt):
 
         targets = pack_padded_sequence(captions, lengths, batch_first=True)[0]
 
-        outputs, seqlen = model(images, captions)
+        #outputs, seqlen = model(images, captions)
+        outputs, _, _, seqlen = model(images, captions)
         outputs = convertOutputVariable(outputs, seqlen, lengths)
 
         loss = crit(outputs, targets)
