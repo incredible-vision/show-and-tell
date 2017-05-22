@@ -44,9 +44,9 @@ class Trainer(object):
         opt.vocab_size = len(self.vocab)
 
         """ setup model and infos for training """
-        self.encoder, _ = model_setup(opt, model_name='cnn_encoder_feature')
-        self.generator, self.infos_gen = model_setup(opt, model_name='show_attend_tell')
-        # self.discriminator, self.infos_disc = model_setup(opt, model_name='discriminator')
+        self.encoder, _ = model_setup(opt, model_name='cnn_encoder')
+        self.generator, self.infos_gen = model_setup(opt, model_name='show_tell')
+        self.discriminator, self.infos_disc = model_setup(opt, model_name='discriminator')
 
         """ This criterion combines LogSoftMax and NLLLoss in one single class """
         self.criterion_MLE = nn.CrossEntropyLoss()
@@ -59,11 +59,11 @@ class Trainer(object):
         # parameters = filter(lambda p: p.requires_grad, self.generator.parameters())
         self.optimizerM = optim.Adam(parameters, lr=opt.learning_rate)
 
-        # parameters = filter(lambda p: p.requires_grad, self.generator.parameters())
-        # self.optimizerG = optim.Adam(parameters, lr=opt.learning_rate)
+        parameters = filter(lambda p: p.requires_grad, self.generator.parameters())
+        self.optimizerG = optim.Adam(parameters, lr=opt.learning_rate)
 
-        # parameters = filter(lambda p: p.requires_grad, self.discriminator.parameters())
-        # self.optimizerD = optim.Adam(parameters, lr=opt.learning_rate)
+        parameters = filter(lambda p: p.requires_grad, self.discriminator.parameters())
+        self.optimizerD = optim.Adam(parameters, lr=opt.learning_rate)
 
         if opt.start_from :
             continue_path = os.path.join(opt.root_dir, 'experiment', opt.user_id, opt.exp_id,'optimizer.pth')
@@ -255,7 +255,7 @@ class Trainer(object):
                 fraction = (epoch - self.opt.learning_rate_decay_start) // self.opt.learning_rate_decay_every
                 decay_factor = self.opt.learning_rate_decay_rate ** fraction
                 self.opt.current_lr = self.opt.learning_rate * decay_factor
-                set_lr(self.optimizer, self.opt.current_lr)
+                set_lr(self.optimizerD, self.opt.current_lr)
             else:
                 self.opt.current_lr = self.opt.learning_rate
 
@@ -273,8 +273,9 @@ class Trainer(object):
                 self.discriminator.zero_grad()
 
                 # train with real
-                image_inputs.data.resize_(images.size()).copy_(images)
-                sentence_real = Variable(captions)
+                # image_inputs.data.resize_(images.size()).copy_(images)
+                images = Variable(images)
+                sentence_real = Variable(captions).cuda()
                 labels.data.resize_(labels.size()).fill_(self.real_label)
 
                 if self.num_gpu > 0:
@@ -285,15 +286,16 @@ class Trainer(object):
                 torch.cuda.synchronize()
                 start = time.time()
 
-                logit = self.discriminator(images, sentence_real)
-                loss_real = self.criterion_D(logit)
+                logit = self.discriminator(sentence_real)
+                loss_real = self.criterion_D(logit, labels.long())
                 loss_real.backward()
 
                 torch.cuda.synchronize()
                 end = time.time()
 
                 # train with fake
-                sentence_fake = self.generator.sample_reinforce(images, maxlen=20)
+                features = self.encoder(images)
+                sentence_fake = self.generator.sample(features, maxlen=20)
                 sentence_fake = sentence_fake.detach()
 
                 labels.data.fill_(self.fake_label)
@@ -301,33 +303,35 @@ class Trainer(object):
                     sentence_fake = sentence_fake.cuda()
                     labels = labels.cuda()
 
-                logit = self.discriminator(images, sentence_fake)
-                loss_fake = self.criterion_D(logit)
+                logit = self.discriminator(sentence_fake)
+                loss_fake = self.criterion_D(logit, labels.long())
                 loss_fake.backward()
                 total_loss = loss_real + loss_fake
 
                 self.optimizerD.step()
 
+                if iter % self.opt.log_step == 0:
+                    print('Epoch [%d/%d], Step [%d/%d], Loss: %.4f'
+                          % (epoch, self.opt.max_epochs, iter, self.total_train_iter,
+                             total_loss.data[0]))
+                    train_loss_history[total_iteration] = {'loss': total_loss.data[0]}
+                    self.train_loss_win = visualize_loss(self.train_loss_win, train_loss_history, 'train_loss', 'loss')
+
 
 
     def train_adversarial(self):
 
-        total_iteration = self.infos.get('total_iter', 0)
-        loaded_iteration = self.infos.get('iter', 0)
-        loaded_epoch = self.infos.get('epoch', 0)
-        val_result_history = self.infos.get('val_result_history', {})
-        loss_history = self.infos.get('loss_history', {})
-        lr_history = self.infos.get('lr_history', {})
-        train_loss_history = self.infos.get('train_loss_history', {})
+        """"""
+        total_iteration = self.infos_disc.get('total_iter', 0)
+        loaded_iteration = self.infos_disc.get('iter', 0)
+        loaded_epoch = self.infos_disc.get('epoch', 0)
+        val_result_history = self.infos_disc.get('val_result_history', {})
+        loss_history = self.infos_disc.get('loss_history', {})
+        lr_history = self.infos_disc.get('lr_history', {})
+        train_loss_history = self.infos_disc.get('train_loss_history', {})
 
-        # loading a best validation score
         if self.opt.load_best_score == True:
-            best_val_score = self.infos.get('best_val_score', None)
-
-        def convertOutputVariable(outputs, maxlen, lengths):
-            outputs = torch.cat(outputs, 1).view(len(lengths), maxlen, -1)
-            outputs = pack_padded_sequence(outputs, lengths, batch_first=True)[0]
-            return outputs
+            best_val_score = self.infos_disc.get('best_val_score', None)
 
         def clip_gradient(optimizer, grad_clip):
             for group in optimizer.param_groups:
@@ -338,111 +342,89 @@ class Trainer(object):
             for group in optimizer.param_groups:
                 group['lr'] = lr
 
+        image_inputs = torch.FloatTensor(self.opt.batch_size, 3, self.opt.image_size, self.opt.image_size)
+        labels = torch.FloatTensor(self.opt.batch_size)
+
+        if self.opt.num_gpu > 0:
+            image_inputs = image_inputs.cuda()
+            labels = labels.cuda()
+
+        image_inputs = Variable(image_inputs)
+        labels = Variable(labels)
+
         for epoch in range(loaded_epoch + 1, 1 + self.opt.max_epochs):
 
             if epoch > self.opt.learning_rate_decay_start and self.opt.learning_rate_decay_start >= 1:
                 fraction = (epoch - self.opt.learning_rate_decay_start) // self.opt.learning_rate_decay_every
                 decay_factor = self.opt.learning_rate_decay_rate ** fraction
                 self.opt.current_lr = self.opt.learning_rate * decay_factor
-                set_lr(self.optimizer, self.opt.current_lr)
+                set_lr(self.optimizerD, self.opt.current_lr)
             else:
                 self.opt.current_lr = self.opt.learning_rate
 
-            self.model.train()
+            self.discriminator.train()
 
             for iter, (images, captions, lengths, imgids) in enumerate(self.trainloader):
 
                 iter += 1
                 total_iteration += 1
 
-                torch.cuda.synchronize()
-                start = time.time()
+                #############################################################
+                # Update Discriminator Network
+                #############################################################
 
-                # Set mini-batch dataset
+                self.discriminator.zero_grad()
+                self.generator.zero_grad()
+
+                # train with real
+                # image_inputs.data.resize_(images.size()).copy_(images)
                 images = Variable(images)
-                captions = Variable(captions)
+                sentence_real = Variable(captions).cuda()
+                labels.data.resize_(labels.size()).fill_(self.real_label)
 
                 if self.num_gpu > 0:
                     images = images.cuda()
-                    captions = captions.cuda()
+                    sentence_real = sentence_real.cuda()
+                    labels = labels.cuda()
 
-                lengths = [l-1 for l in lengths]
-                targets = pack_padded_sequence(captions[:,1:], lengths, batch_first=True)[0]
-                # Forward, Backward and Optimize
-                self.model.zero_grad()
+                torch.cuda.synchronize()
+                start = time.time()
 
-                # Sequence Length, we can manually designate maximum sequence length
-                # or get maximum sequence length in ground truth captions
-                seqlen = self.seqlen if self.seqlen is not None else lengths[0]
-
-                outputs = self.model(images, captions[:,:-1], seqlen)
-                outputs = convertOutputVariable(outputs, seqlen, lengths)
-
-                loss = self.criterion(outputs, targets)
-                loss.backward()
-                clip_gradient(self.optimizer, self.opt.grad_clip)
-                self.optimizer.step()
+                logit = self.discriminator(sentence_real)
+                loss_real = self.criterion_D(logit, labels.long())
+                loss_real.backward()
 
                 torch.cuda.synchronize()
                 end = time.time()
 
-                if iter % self.opt.log_step == 0:
-                    print('Epoch [%d/%d], Step [%d/%d], Loss: %.4f, Perplexity: %5.4f'
-                          % (epoch, self.opt.max_epochs, iter, self.total_train_iter,
-                             loss.data[0], np.exp(loss.data[0])))
-                    train_loss_history[total_iteration] = {'loss': loss.data[0], 'perplexity': np.exp(loss.data[0])}
-                    self.train_loss_win = visualize_loss(self.train_loss_win, train_loss_history, 'train_loss', 'loss')
+                # train with fake
+                features = self.encoder(images)
+                sentence_fake = self.generator.sample(features, maxlen=20)
+                sentence_fake = sentence_fake.detach()
 
-                # make evaluation on validation set, and save model
-                if (total_iteration % self.opt.save_checkpoint_every == 0):
-                    print('start evaluate ...')
-                    val_loss, predictions, lang_stats = evaluation(self.model, self.criterion,
-                                                                   self.validloader, self.vocab, self.opt)
-                    val_result_history[total_iteration] = {'loss': val_loss, 'lang_stats': lang_stats,
-                                                           'predictions': predictions}
+                labels.data.fill_(self.fake_label)
+                if self.num_gpu > 0:
+                    sentence_fake = sentence_fake.cuda()
+                    labels = labels.cuda()
 
-                    # Write the training loss summary
-                    # loss_history[total_iteration] = loss.data[0].cpu().numpy()[0]
-                    loss_history[total_iteration] = loss.data[0]
-                    lr_history[total_iteration] = self.opt.current_lr
+                logit = self.discriminator(sentence_fake)
+                loss_fake = self.criterion_D(logit, labels.long())
+                loss_fake.backward()
+                total_loss = loss_real + loss_fake
 
-                    # Save model if is improving on validation result
-                    if self.opt.language_eval == 1:
-                        current_score = lang_stats['CIDEr']
-                    else:
-                        current_score = - val_loss
+                self.optimizerD.step()
 
-                    best_flag = False
-                    if best_val_score is None or current_score > best_val_score:
-                        best_val_score = current_score
-                        best_flag = True
+                #############################################################
+                # Update Generator Network
+                #############################################################
+                features = self.encoder(images)
+                sentence_fake = self.generator.sample_reinforce(features, maxlen=20)
+                sentence_fake = sentence_fake.detach()
 
-                    checkpoint_path = os.path.join(self.opt.expr_dir, 'model.pth')
-                    torch.save(self.model.state_dict(), checkpoint_path)
-                    print("model saved to {}".format(checkpoint_path))
-                    optimizer_path = os.path.join(self.opt.expr_dir, 'optimizer.pth')
-                    torch.save(self.optimizer.state_dict(), optimizer_path)
-
-                    # Dump miscalleous informations
-                    self.infos['total_iter'] = total_iteration
-                    self.infos['iter'] = iter
-                    self.infos['epoch'] = epoch
-                    self.infos['best_val_score'] = best_val_score
-                    self.infos['opt'] = self.opt
-                    self.infos['val_result_history'] = val_result_history
-                    self.infos['loss_history'] = loss_history
-                    self.infos['lr_history'] = lr_history
-                    self.infos['train_loss_history'] = train_loss_history
-                    with open(os.path.join(self.opt.expr_dir, 'infos' + '.pkl'), 'wb') as f:
-                        pickle.dump(self.infos, f)
-
-                    if best_flag:
-                        checkpoint_path = os.path.join(self.opt.expr_dir, 'model-best.pth')
-                        torch.save(self.model.state_dict(), checkpoint_path)
-                        print("model saved to {}".format(self.opt.expr_dir))
-                        with open(os.path.join(self.opt.expr_dir, 'infos' + '-best.pkl'), 'wb') as f:
-                            pickle.dump(self.infos, f)
-
+                labels.data.fill_(self.real_label)
+                if self.num_gpu > 0:
+                    sentence_fake = sentence_fake.cuda()
+                    labels = labels.cuda()
 
 if __name__ == '__main__':
 

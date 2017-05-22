@@ -8,7 +8,7 @@ import numpy as np
 class EncoderCNN(nn.Module):
     def __init__(self, opt):
         super(EncoderCNN, self).__init__()
-        self.cnn = models.resnet152(pretrained=True) if opt.cnn_type == 'resnet' else models.vgg16(pretrained=True)
+        self.cnn = models.resnet34(pretrained=True) if opt.cnn_type == 'resnet' else models.vgg16(pretrained=True)
         self.cnn.fc = nn.Linear(self.cnn.fc.in_features, opt.img_embed_size)
         self.bn = nn.BatchNorm1d(opt.img_embed_size, momentum=0.01)
         self.finetune(allow=False)

@@ -72,7 +72,7 @@ class ShowAttendTellModel(nn.Module):
         self.init_memory = nn.Linear(2 * self.hidden_size, self.hidden_size, bias=True)
 
     def forward(self, features, captions, seqlen, gt=True):
-        # xt : [batch x embed_size], encode images with encoder,
+        # features : [batch x 14 x 14, 1024], encoded images with encoder,
         # caption : [batch x seq x embed_size], embed captions with embeddings
         image_encode = features.view(features.size(0), features.size(1), -1).transpose(2, 1) # [batch x 196 x 1024]
         context_encode = torch.bmm(image_encode, self.image_att_w.unsqueeze(0).expand(image_encode.size(0), self.image_att_w.size(0), self.image_att_w.size(1)))  # [batch, 196, 512]
@@ -102,7 +102,7 @@ class ShowAttendTellModel(nn.Module):
         xt_emb = torch.bmm(xt, self.weight_ctc.unsqueeze(0).expand(xt.size(0), self.weight_ctc.size(0),
                                                                    self.weight_ctc.size(1)))
         context = (xt_emb * alpha.unsqueeze(2).expand_as(xt_emb)).mean(1).squeeze(1)
-        return context, alpha
+        return F.tanh(context), alpha
 
     def output_layer(self, context, hidden, prev_word=None):
         out = context + hidden + prev_word if prev_word else (context + hidden)

@@ -17,20 +17,19 @@ from models.Encoder import EncoderCNN, EncoderCNN_F
 def model_setup(opt, model_name):
 
     if model_name == 'show_tell':
-        opt.load_pretrain = False
-        opt.start_from = False
+        opt.pretrain_path = os.path.join('experiment', opt.user_id, 'show_tell', 'model-decoder.pth')
+        opt.start_from = None
         model = ShowTellModel(opt)
     elif model_name == 'show_attend_tell':
         opt.load_pretrain = False
         opt.start_from = False
         model = ShowAttendTellModel(opt)
     elif model_name == 'discriminator':
-        opt.load_pretrain = False
-        opt.start_from = False
+        opt.start_from = None
         model = Discriminator(opt)
     elif model_name == 'cnn_encoder':
-        opt.load_pretrain = False
-        opt.start_from = False
+        opt.pretrain_path = os.path.join('experiment', opt.user_id, 'show_attend_tell', 'model-encoder-best.pth')
+        opt.start_from = None
         opt.cnn_type = 'resnet'
         opt.img_embed_size = 512
         model = EncoderCNN(opt)
@@ -47,22 +46,21 @@ def model_setup(opt, model_name):
         model = nn.DataParallel(model.cuda(), device_ids=range(opt.num_gpu))
 
     infos = {}
-    if vars(opt).get('load_pretrain', False):
-        pretrain_path = os.path.join(opt.root_dir, 'experiment', opt.user_id, opt.exp_id)
-        assert os.path.isdir(pretrain_path), " %s must be a path" % pretrain_path
-        assert os.path.isfile(os.path.join(pretrain_path, "infos-best.pkl")), "infos-best.pkl file does not exist in path %s" % pretrain_path
-        model.load_state_dict(torch.load(os.path.join(pretrain_path, "model-best.pth")))
-        print('load pretrained model from %s' % os.path.join(pretrain_path, "model-best.pth"))
+    if vars(opt).get('pretrain_path', None) is not None:
 
-    elif vars(opt).get('start_from', False):
-        continue_path = os.path.join(opt.root_dir, 'experiment', opt.user_id, opt.exp_id)
-        assert os.path.isdir(continue_path), " %s must be a path" % continue_path
-        assert os.path.isfile(os.path.join(continue_path, "infos.pkl")), "infos.pkl file does not exist in path %s" % continue_path
-        model.load_state_dict(torch.load(os.path.join(continue_path, "model.pth")))
-        with open(os.path.join(continue_path, 'infos' + '.pkl')) as f:
+        assert os.path.isfile(opt.pretrain_path), "file does not exist in path %s" % opt.pretrain_path
+        model.load_state_dict(torch.load(opt.pretrain_path))
+        print('load pretrained model from %s' % opt.pretrain_path)
+
+    elif vars(opt).get('start_from', None) is not None:
+
+        assert os.path.isfile(opt.start_from), "infos.pkl file does not exist in path %s" % opt.start_from
+        model.load_state_dict(torch.load(opt.start_from))
+        with open(os.path.join(opt.start_from, 'infos' + '.pkl')) as f:
             infos = pickle.load(f)
-        print('continue training the model from %s' % os.path.join(continue_path, "model.pth"))
+        print('continue training the model from %s' % opt.continue_path)
     else:
         print('training the %s model from scratch' % model_name)
 
     return model, infos
+
