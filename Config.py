@@ -16,10 +16,10 @@ def parse_opt():
     parser.add_argument('--random_seed', type=int, default=123, help='random seed number, to reproduce the result, fix the number')
     parser.add_argument('--crop_size', type=int, default=224, help='image crop size, spatial dimension of input to the encoder')
     parser.add_argument('--image_size', type=int, default=224, help='image crop size, spatial dimension of input to the encoder')
-    parser.add_argument('--batch_size', type=int, default=80, help='batch size for training')
+    parser.add_argument('--batch_size', type=int, default=128, help='batch size for training')
 
     parser.add_argument('--expr_dir', type=str, default='experiment', help='experiment directory')
-    parser.add_argument('--exp_id', type=str, default='show_attend_tell', help='experiment id')
+    parser.add_argument('--exp_id', type=str, default='show_tell', help='experiment id')
     parser.add_argument('--user_id', type=str, default='myunggi', help='user id')
     parser.add_argument('--start_from', type=str, default=None, help='continue from this configurations')
 
