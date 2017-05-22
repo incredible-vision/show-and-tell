@@ -33,7 +33,7 @@ def parse_opt():
     parser.add_argument('--load_optim_path', action="store_true", default=False)
     parser.add_argument('--load_pretrained', action='store_false', default=False)
 
-    parser.add_argument('--learning_rate', type=float, default=5e-4)
+    parser.add_argument('--learning_rate', type=float, default=5e-6)
     parser.add_argument('--max_epochs', type=int, default=120)
 
     parser.add_argument('--learning_rate_decay_start', type=int, default=1, help='at what iteration to start decaying learning rate? (-1 = dont) (in epoch)')
@@ -50,7 +50,7 @@ def parse_opt():
 
     parser.add_argument('--language_eval', type=int, default=1, help='1 for Cider score, 0 for log loss')
 
-    parser.add_argument('--save_checkpoint_every', type=int, default=5177, help='how often to save a model checkpoint (in iterations)?')
+    parser.add_argument('--save_checkpoint_every', type=int, default=3236, help='how often to save a model checkpoint (in iterations)?')
 
     args = parser.parse_args()
 

@@ -17,7 +17,7 @@ from models.Encoder import EncoderCNN, EncoderCNN_F
 def model_setup(opt, model_name):
 
     if model_name == 'show_tell':
-        # opt.pretrain_path = os.path.join('experiment', opt.user_id, 'show_tell', 'model-decoder.pth')
+        opt.pretrain_path = os.path.join('experiment', opt.user_id, 'show_tell', 'model-decoder.pth')
         opt.start_from = None
         model = ShowTellModel(opt)
     elif model_name == 'show_attend_tell':
@@ -25,10 +25,11 @@ def model_setup(opt, model_name):
         opt.start_from = False
         model = ShowAttendTellModel(opt)
     elif model_name == 'discriminator':
+        opt.pretrain_path = None
         opt.start_from = None
         model = Discriminator(opt)
     elif model_name == 'cnn_encoder':
-        # opt.pretrain_path = os.path.join('experiment', opt.user_id, 'show_tell', 'model-encoder.pth')
+        opt.pretrain_path = os.path.join('experiment', opt.user_id, 'show_tell', 'model-encoder.pth')
         opt.start_from = None
         opt.cnn_type = 'resnet'
         opt.img_embed_size = 512
