@@ -72,7 +72,8 @@ def get_loader(opt, mode='train', shuffle=True, num_workers=1, transform=None):
                                               batch_size=opt.batch_size,
                                               shuffle=shuffle,
                                               num_workers=num_workers,
-                                              collate_fn=collate_fn)
+                                              collate_fn=collate_fn,
+                                              pin_memory=True)
 
     return data_loader
 

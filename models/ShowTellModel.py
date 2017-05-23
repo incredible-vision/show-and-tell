@@ -125,7 +125,7 @@ class ShowTellModel(nn.Module):
             xt = self.embedding(action.detach()).squeeze(1)
 
         generated_sentence = torch.cat(actions, 1)
-        return generated_sentence.squeeze()
+        return generated_sentence.squeeze(), actions
 
     def getStochasticAction(self, output):
         distribution = F.softmax(output)

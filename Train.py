@@ -12,6 +12,8 @@ from ModelSetup import model_setup
 from models.ShowTellModel import ShowTellModel
 from torch.autograd import Variable
 import torch.optim as optim
+import torch.nn.functional as F
+import torch.autograd as autograd
 from torch.nn.utils.clip_grad import clip_grad_norm
 from torch.nn.utils.rnn import pack_padded_sequence
 from torchvision import transforms
@@ -54,7 +56,7 @@ class Trainer(object):
         self.criterion_D = nn.CrossEntropyLoss()
 
         """ only update trainable parameters """
-        parameters = list(self.generator.parameters())
+        parameters = list(self.generator.parameters()) + list(self.encoder.parameters())
         parameters = filter(lambda p: p.requires_grad, parameters)
         # parameters = filter(lambda p: p.requires_grad, self.generator.parameters())
         self.optimizerM = optim.Adam(parameters, lr=opt.learning_rate)
@@ -63,7 +65,7 @@ class Trainer(object):
         self.optimizerG = optim.Adam(parameters, lr=opt.learning_rate)
 
         parameters = filter(lambda p: p.requires_grad, self.discriminator.parameters())
-        self.optimizerD = optim.Adam(parameters, lr=opt.learning_rate)
+        self.optimizerD = optim.Adam(parameters, lr=5e-6)
 
         if opt.start_from :
             continue_path = os.path.join(opt.root_dir, 'experiment', opt.user_id, opt.exp_id,'optimizer.pth')
@@ -376,7 +378,6 @@ class Trainer(object):
                     sentence_real = sentence_real.cuda()
                     labels = labels.cuda()
 
-                """
                 logit = self.discriminator(sentence_real)
                 loss_real = self.criterion_D(logit, labels.long())
                 loss_real.backward()
@@ -397,18 +398,90 @@ class Trainer(object):
                 total_loss = loss_real + loss_fake
 
                 self.optimizerD.step()
-                """
+
                 #############################################################
                 # Update Generator Network
                 #############################################################
                 features = self.encoder(images)
-                sentence_fake = self.generator.sample_reinforce(features, maxlen=20)
-                sentence_fake = sentence_fake.detach()
+                sentence_fake, actions = self.generator.sample_reinforce(features, maxlen=20)
+                # sentence_fake = sentence_fake.detach()
 
                 labels.data.fill_(self.real_label)
-                if self.num_gpu > 0:
-                    sentence_fake = sentence_fake.cuda()
-                    labels = labels.cuda()
+                # if self.num_gpu > 0:
+                #     sentence_fake = sentence_fake.cuda()
+                #     labels = labels.cuda()
+
+                logit = self.discriminator(sentence_fake)
+                loss_adversarial = self.criterion_G(logit, labels)
+                rewards = np.repeat(loss_adversarial, sentence_fake.size(1))
+                for action, r in zip(actions, rewards):
+                    action.reinforce(float(r.data.cpu().numpy()[0]))
+                autograd.backward(actions, [None for _ in actions])
+
+                self.optimizerG.step()
+
+                if iter % self.opt.log_step == 0:
+                    print('Epoch [%d/%d], Step [%d/%d], Discriminator Loss: %.4f, Generator Loss: %.4f'
+                          % (epoch, self.opt.max_epochs, iter, self.total_train_iter,
+                             total_loss.data[0], loss_adversarial.data[0]))
+                    # train_loss_history[total_iteration] = {'loss': total_loss.data[0]}
+                    # self.train_loss_win = visualize_loss(self.train_loss_win, train_loss_history, 'train_discriminator_loss', 'loss')
+                if (total_iteration % self.opt.save_checkpoint_every == 0):
+                    print('start evaluating ...')
+                    val_loss, predictions, lang_stats = evaluation((self.encoder, self.generator), self.criterion_MLE,
+                                                                   self.validloader, self.vocab, self.opt)
+                    val_result_history[total_iteration] = {'loss': val_loss, 'lang_stats': lang_stats,
+                                                           'predictions': predictions}
+
+                    # Write the training loss summary
+                    # loss_history[total_iteration] = loss.data[0].cpu().numpy()[0]
+                    loss_history[total_iteration] = total_loss.data[0]
+                    lr_history[total_iteration] = self.opt.current_lr
+
+                    # Save model if is improving on validation result
+                    if self.opt.language_eval == 1:
+                        current_score = lang_stats['CIDEr']
+                    else:
+                        current_score = - val_loss
+
+                    best_flag = False
+                    if best_val_score is None or current_score > best_val_score:
+                        best_val_score = current_score
+                        best_flag = True
+
+                    checkpoint_path = os.path.join(self.opt.expr_dir, 'model-encoder.pth')
+                    torch.save(self.encoder.state_dict(), checkpoint_path)
+                    print("model saved to {}".format(checkpoint_path))
+                    checkpoint_path = os.path.join(self.opt.expr_dir, 'model-decoder.pth')
+                    torch.save(self.generator.state_dict(), checkpoint_path)
+                    print("model saved to {}".format(checkpoint_path))
+                    optimizer_path = os.path.join(self.opt.expr_dir, 'optimizer.pth')
+                    torch.save(self.optimizerM.state_dict(), optimizer_path)
+                    print("optimizer saved to {}".format(optimizer_path))
+
+                    # Dump miscalleous informations
+                    self.infos_gen['total_iter'] = total_iteration
+                    self.infos_gen['iter'] = iter
+                    self.infos_gen['epoch'] = epoch
+                    self.infos_gen['best_val_score'] = best_val_score
+                    self.infos_gen['opt'] = self.opt
+                    self.infos_gen['val_result_history'] = val_result_history
+                    self.infos_gen['loss_history'] = loss_history
+                    self.infos_gen['lr_history'] = lr_history
+                    self.infos_gen['train_loss_history'] = train_loss_history
+                    with open(os.path.join(self.opt.expr_dir, 'infos' + '.pkl'), 'wb') as f:
+                        pickle.dump(self.infos_gen, f)
+
+                    if best_flag:
+                        checkpoint_path = os.path.join(self.opt.expr_dir, 'model-encoder-best.pth')
+                        torch.save(self.encoder.state_dict(), checkpoint_path)
+                        print("model saved to {}".format(checkpoint_path))
+                        checkpoint_path = os.path.join(self.opt.expr_dir, 'model-decoder-best.pth')
+                        torch.save(self.generator.state_dict(), checkpoint_path)
+                        print("model saved to {}".format(checkpoint_path))
+                        with open(os.path.join(self.opt.expr_dir, 'infos' + '-best.pkl'), 'wb') as f:
+                            pickle.dump(self.infos_gen, f)
+
 
 
 

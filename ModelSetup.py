@@ -21,12 +21,12 @@ def model_setup(opt, model_name):
         opt.start_from = None
         model = ShowTellModel(opt)
     elif model_name == 'show_attend_tell':
-        opt.load_pretrain = False
+        opt.pretrain_path = False
         opt.start_from = False
         model = ShowAttendTellModel(opt)
     elif model_name == 'discriminator':
-        # opt.pretrain_path = os.path.join('experiment', opt.user_id, 'show_tell', 'model-discriminator.pth')
-        opt.pretrain_path = None
+        opt.pretrain_path = os.path.join('experiment', opt.user_id, 'show_tell', 'model-discriminator.pth')
+        # opt.pretrain_path = None
         opt.start_from = None
         model = Discriminator(opt)
     elif model_name == 'cnn_encoder':
@@ -36,7 +36,7 @@ def model_setup(opt, model_name):
         opt.img_embed_size = 512
         model = EncoderCNN(opt)
     elif model_name == 'cnn_encoder_feature':
-        opt.load_pretrain = False
+        opt.pretrain_path = False
         opt.start_from = False
         model = EncoderCNN_F(opt)
     else:
