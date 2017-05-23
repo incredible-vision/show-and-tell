@@ -238,17 +238,6 @@ class Trainer(object):
             for group in optimizer.param_groups:
                 group['lr'] = lr
 
-
-        image_inputs = torch.FloatTensor(self.opt.batch_size, 3, self.opt.image_size, self.opt.image_size)
-        labels = torch.LongTensor(self.opt.batch_size)
-
-        image_inputs = Variable(image_inputs)
-        labels = Variable(labels)
-
-        if self.opt.num_gpu > 0:
-            image_inputs = image_inputs.cuda()
-            labels = labels.cuda()
-
         for epoch in range(loaded_epoch + 1, 1 + self.opt.max_epochs):
 
             if epoch > self.opt.learning_rate_decay_start and self.opt.learning_rate_decay_start >= 1:
@@ -275,17 +264,18 @@ class Trainer(object):
 
                 # train with real
                 # image_inputs.data.resize_(images.size()).copy_(images)
-                image_inputs.data.resize_(image_inputs.size()).copy_(images)
+                # image_inputs.data.resize_(image_inputs.size()).copy_(images)
+                images = Variable(images, volatile=False)
                 sentence_real = Variable(captions, volatile=False)
-                labels.data.resize_(labels.size()).fill_(self.real_label)
-
+                # labels.data.resize_(labels.size()).fill_(self.real_label)
+                labels = Variable(torch.zeros(images.size(0)).fill_(self.real_label)).long()
                 # images = Variable(images)
                 # labels = Variable(labels)
 
                 if self.num_gpu > 0:
-                    # image_inputs = image_inputs.cuda()
+                    images = images.cuda()
                     sentence_real = sentence_real.cuda()
-                    # labels = labels.cuda()
+                    labels = labels.cuda()
 
                 # torch.cuda.synchronize()
                 # start = time.time()
@@ -296,7 +286,7 @@ class Trainer(object):
 
 
                 # train with fake
-                features = self.encoder(image_inputs)
+                features = self.encoder(images)
                 sentence_fake = self.generator.sample(features.detach(), maxlen=20)
                 sentence_fake = sentence_fake.detach()
 
@@ -323,7 +313,9 @@ class Trainer(object):
                     train_loss_history[total_iteration] = {'loss': total_loss.data[0]}
                     self.train_loss_win = visualize_loss(self.train_loss_win, train_loss_history, 'train_discriminator_loss', 'loss')
 
-
+            checkpoint_path = os.path.join(self.opt.expr_dir, 'model-discriminator.pth')
+            torch.save(self.discriminator.state_dict(), checkpoint_path)
+            print("model saved to {}".format(checkpoint_path))
 
     def train_adversarial(self):
 
@@ -348,15 +340,6 @@ class Trainer(object):
             for group in optimizer.param_groups:
                 group['lr'] = lr
 
-        image_inputs = torch.FloatTensor(self.opt.batch_size, 3, self.opt.image_size, self.opt.image_size)
-        labels = torch.FloatTensor(self.opt.batch_size)
-
-        if self.opt.num_gpu > 0:
-            image_inputs = image_inputs.cuda()
-            labels = labels.cuda()
-
-        image_inputs = Variable(image_inputs)
-        labels = Variable(labels)
 
         for epoch in range(loaded_epoch + 1, 1 + self.opt.max_epochs):
 
@@ -378,30 +361,25 @@ class Trainer(object):
                 #############################################################
                 # Update Discriminator Network
                 #############################################################
-
+                self.encoder.zero_grad()
                 self.discriminator.zero_grad()
                 self.generator.zero_grad()
 
                 # train with real
                 # image_inputs.data.resize_(images.size()).copy_(images)
-                images = Variable(images)
-                sentence_real = Variable(captions).cuda()
-                labels.data.resize_(labels.size()).fill_(self.real_label)
+                images = Variable(images, volatile=False)
+                sentence_real = Variable(captions, volatile=False)
+                labels = Variable(torch.zeros(images.size(0)).fill_(self.real_label)).long()
 
                 if self.num_gpu > 0:
                     images = images.cuda()
                     sentence_real = sentence_real.cuda()
                     labels = labels.cuda()
 
-                torch.cuda.synchronize()
-                start = time.time()
-
+                """
                 logit = self.discriminator(sentence_real)
                 loss_real = self.criterion_D(logit, labels.long())
                 loss_real.backward()
-
-                torch.cuda.synchronize()
-                end = time.time()
 
                 # train with fake
                 features = self.encoder(images)
@@ -419,7 +397,7 @@ class Trainer(object):
                 total_loss = loss_real + loss_fake
 
                 self.optimizerD.step()
-
+                """
                 #############################################################
                 # Update Generator Network
                 #############################################################
@@ -431,6 +409,9 @@ class Trainer(object):
                 if self.num_gpu > 0:
                     sentence_fake = sentence_fake.cuda()
                     labels = labels.cuda()
+
+
+
 
 if __name__ == '__main__':
 

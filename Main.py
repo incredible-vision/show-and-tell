@@ -50,6 +50,7 @@ def main(opt):
     trainer = Trainer(opt, train_dataloader, valid_dataloader)
     # trainer.train_mle()
     trainer.train_discriminator()
+    # trainer.train_adversarial()
     print('done')
 
 
