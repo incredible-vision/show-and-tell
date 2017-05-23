@@ -392,54 +392,6 @@ class ShowAttendTellModel_G(nn.Module):
         annFile = '/home/gt/D_Data/COCO/annotations_captions/captions_val2014.json'
         self.coco = COCO(annFile)
 
-    def forward(self, images, captions, maxlen=None):
-        # images : [batch x 3 x 224 x 224]
-
-        xt = self.encoder(images) # xt : [batch x embed_size], encode images with encoder,
-
-        captions = self.embedding(captions) # caption : [batch x seq x embed_size], embed captions with embeddings
-        state = self.init_hidden(xt.size(0))
-
-        seqlen = maxlen if maxlen is not None else captions.data.size(1)
-
-        hidden, state = self.lstm(xt.unsqueeze(0), state)
-
-        outputs = []
-        outputs_action = []
-        outputs_embedding = []
-
-        # Loop for the sequence
-        for t in range(seqlen):
-            # One step over lstm cell
-            xt = captions[:, t, :]
-            hidden, state = self.lstm(xt.unsqueeze(0), state)
-            output = self.classifier(hidden.squeeze(0))
-
-            outputs.append(output)
-
-            action = output.multinomial()
-            outputs_action.append(action)
-
-            action_emb = self.embedding(action).squeeze(1)
-            outputs_embedding.append(action_emb)
-
-        outputs_embedding = self.pad_outputs_to_maxlen(captions, outputs_embedding, max_length=20)
-        # [20x(128,10000)], [20x(64,1)],   [20,(64,512)]                      20
-        return outputs, outputs_action, outputs_embedding[:self.max_length], seqlen
-
-
-    def pad_outputs_to_maxlen(self, captions, outputs_embedding, max_length=20):
-        # input : captions(batch, lengths)
-        batch_size = captions.size(0)
-        max_batch_length = captions.size(1)
-
-        for i in range(max_length - max_batch_length):
-            temp = self.embedding(Variable(torch.LongTensor(batch_size).zero_()).cuda())
-            outputs_embedding.append(temp)
-
-        return outputs_embedding
-
-
     def init_hidden(self, batch_size):
         weight = next(self.parameters()).data
         return (Variable(weight.new(self.num_layers, batch_size, self.hidden_size).zero_()),
@@ -457,7 +409,77 @@ class ShowAttendTellModel_G(nn.Module):
         for param in self.resnet.fc.parameters():
             param.requires_grad = True
 
-    def sample(self, images, max_length=20):
+    # for Pre-training : train_MLE=True
+    # for GAN-training : train_MLE=False
+    def forward(self, images, captions, maxlen=None, train_MLE=False):
+        # images : [batch x 3 x 224 x 224]
+
+        xt = self.encoder(images) # xt : [batch x embed_size], encode images with encoder,
+
+        captions = self.embedding(captions) # caption : [batch x seq x embed_size], embed captions with embeddings
+        state = self.init_hidden(xt.size(0))
+
+        seqlen = maxlen if maxlen is not None else captions.data.size(1)
+
+        hidden, state = self.lstm(xt.unsqueeze(0), state)
+
+        outputs = []
+        outputs_action = []
+        outputs_embedding = []
+
+        # if train_MLE == True // for pre-training
+        if train_MLE==True:
+            for t in range(seqlen):
+                xt = captions[:, t, :]
+                hidden, state = self.lstm(xt.unsqueeze(0), state)
+                output = self.classifier(hidden.squeeze(0))
+
+                outputs.append(output)
+
+                action = output.multinomial()
+                outputs_action.append(action)
+
+                action_emb = self.embedding(action).squeeze(1)
+                outputs_embedding.append(action_emb)
+
+        # if train_MLE == False // for GAN-training
+        else:
+            word = Variable(torch.ones(images.size(0)).long()).cuda()
+            xt = self.embedding(word)
+
+            for t in range(seqlen):
+                hidden, state = self.lstm(xt.unsqueeze(0), state)
+                output = self.classifier(hidden.squeeze(0))
+
+                outputs.append(output)
+
+                action = output.multinomial()
+                outputs_action.append(action)
+
+                action_emb = self.embedding(action).squeeze(1)
+                outputs_embedding.append(action_emb)
+
+                xt = action_emb.detach() # !!@!
+
+            outputs_embedding = self.pad_outputs_to_maxlen(captions, outputs_embedding, max_length=20)
+
+        return outputs, outputs_action, outputs_embedding[:self.max_length], seqlen
+    #     # [20x(128,10000)], [20x(64,1)],   [20,(64,512)]                      20
+
+    def pad_outputs_to_maxlen(self, captions, outputs_embedding, max_length=20):
+        # input : captions(batch, lengths)
+        batch_size = captions.size(0)
+        max_batch_length = captions.size(1)
+
+        for i in range(max_length - max_batch_length):
+            temp = self.embedding(Variable(torch.LongTensor(batch_size).zero_()).cuda())
+            outputs_embedding.append(temp)
+
+        return outputs_embedding
+
+
+    # for D_network_training.. : generate fake sample
+    def sample_multinomial(self, images, max_length=20):
         xt = self.encoder(images)
         state = self.init_hidden(xt.size(0))
 
@@ -478,25 +500,26 @@ class ShowAttendTellModel_G(nn.Module):
             #xt = self.embedding(predicted_greedy).squeeze(1)
             #saved_embedding.append(xt)
 
-            # Option 2 : Multinomal search
+            # Option 2 : Multinomial search
             predicted_multinomial = output.multinomial()
             outputs_multinomial.append(predicted_multinomial)
             xt = self.embedding(predicted_multinomial).squeeze(1)
             outputs_embedding.append(xt.detach())
-            #outputs_embedding.append(xt)
+
+        outputs_multinomial = torch.cat(outputs_multinomial, 1)
 
         return outputs_multinomial, outputs_embedding
 
-
+    # for D_network_training.. : generate real sample
     def gt_sentences(self, captions):
         # input : captions(batch, lengths)
-        batch_size = captions.size(0)
+        iter_batch_size = captions.size(0)
         max_batch_length = captions.size(1)
 
         if self.max_length <= max_batch_length: # if: max_batch_length >= 20
             _gt_sentences = captions
         else:                                   # else: padd 0 to length 20
-            temp = Variable(torch.LongTensor(batch_size, self.max_length - max_batch_length).zero_()).cuda()
+            temp = Variable(torch.LongTensor(iter_batch_size, self.max_length - max_batch_length).zero_()).cuda()
             _gt_sentences = torch.cat((captions, temp), 1)
 
         gt_sentences_embedding = torch.transpose(self.embedding(_gt_sentences), 0, 1)
@@ -505,8 +528,30 @@ class ShowAttendTellModel_G(nn.Module):
         gt_sentences = torch.transpose(_gt_sentences, 0, 1)
         gt_sentences = [t.unsqueeze(1) for t in gt_sentences]
 
-        return gt_sentences[:self.max_length], gt_sentences_embedding[:self.max_length]   # [[B x Emb] x L]
+        gt_sentences = torch.cat(gt_sentences[:self.max_length], 1)
 
+        return gt_sentences, gt_sentences_embedding[:self.max_length]   # [[B x Emb] x L]
+
+    # for Evaluation
+    def sample(self, images, maxlen=20):
+
+        xt = self.encoder(images)
+        state = self.init_hidden(xt.size(0))
+
+        hidden, state = self.lstm(xt.unsqueeze(0), state)
+        outputs = []
+        word = Variable(torch.ones(images.size(0)).long()).cuda()
+        xt = self.embedding(word)
+        for t in range(maxlen):
+
+            hidden, state = self.lstm(xt.unsqueeze(0), state)
+            output = self.classifier(hidden.squeeze(0))
+            predicted = output.max(1)[1]
+            outputs.append(predicted)
+            xt = self.embedding(predicted).squeeze(1)
+
+        generated_sentence = torch.cat(outputs, 1)
+        return generated_sentence.squeeze()
 
 
 class ShowAttendTellModel_D(nn.Module):
@@ -533,6 +578,7 @@ class ShowAttendTellModel_D(nn.Module):
         input = torch.cat(input, 0)             # [20, 128, 512]
 
         output, hn = self.bi_lstm(input) # [20, 128, 512x2]
+        iter_batch_size = output.size()[1]
 
         output = torch.transpose(output, 0, 1) # [128, 20, 512x2]
         H_ = torch.cat(output, 0)              # [128x20, 1024]
@@ -541,7 +587,7 @@ class ShowAttendTellModel_D(nn.Module):
         temp = F.tanh(temp)    # temp = 128x20, 512
         temp = self.W_s2(temp) # temp = 128x20, 1
 
-        temp = temp.view(self.opt.batch_size, 20) # temp = 128, 20
+        temp = temp.view(iter_batch_size, 20) # temp = 128, 20
         attention = F.softmax(temp)               # attention = 128, 20
 
         attention = attention.unsqueeze(2).repeat(1,1, self.opt.embed_size*2) # attention = 128, 20, 1024
