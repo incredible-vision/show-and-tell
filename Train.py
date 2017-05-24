@@ -283,22 +283,33 @@ class Trainer(object):
                 # torch.cuda.synchronize()
                 # start = time.time()
 
-                logit = self.discriminator(sentence_real)
+                logit, _ = self.discriminator(sentence_real)
                 loss_real = self.criterion_D(logit, labels.long())
                 loss_real.backward()
 
 
                 # train with fake
+                captions_fake = Variable(torch.zeros(len(captions), max(lengths)).long())
+
                 features = self.encoder(images)
                 sentence_fake = self.generator.sample(features.detach(), maxlen=20)
-                sentence_fake = sentence_fake.detach()
+
+                for batch, sentence_ids in enumerate(sentence_fake):
+
+                    for i, word_id in enumerate(sentence_ids):
+                        if word_id.data.cpu().numpy()[0] == 2 or i == max(lengths):
+                            break
+
+                    captions_fake[batch, :i] = sentence_ids[:i]
+
+                sentence_fake = captions_fake.detach()
 
                 labels.data.fill_(self.fake_label)
                 if self.num_gpu > 0:
                     sentence_fake = sentence_fake.cuda()
                     # labels = labels.cuda()
 
-                logit = self.discriminator(sentence_fake)
+                logit, _ = self.discriminator(sentence_fake)
                 loss_fake = self.criterion_D(logit, labels.long())
                 loss_fake.backward()
                 total_loss = loss_real + loss_fake
@@ -385,9 +396,20 @@ class Trainer(object):
                 loss_real.backward()
 
                 # train with fake
+                captions_fake = Variable(torch.zeros(len(captions), max(lengths)).long())
+
                 features = self.encoder(images)
                 sentence_fake = self.generator.sample(features, maxlen=20)
-                sentence_fake = sentence_fake.detach()
+
+                for batch, sentence_ids in enumerate(sentence_fake):
+
+                    for i, word_id in enumerate(sentence_ids):
+                        if word_id.data.cpu().numpy()[0] == 2:
+                            break
+                        # sampled_caption.append(word_id)
+                    captions_fake[batch, :i] = sentence_ids[:i]
+
+                sentence_fake = captions_fake.detach()
 
                 labels.data.fill_(self.fake_label)
                 if self.num_gpu > 0:
@@ -406,7 +428,7 @@ class Trainer(object):
                 features = self.encoder(images)
                 labels.data.fill_(self.real_label)
 
-                if 1:
+                if 0:
                     sentence_fake, actions = self.generator.sample_reinforce(features, maxlen=20)
                 else:
                     sentence_fack, actions = self.generator.sample_gumble_softmax(features, maxlen=20)
@@ -421,7 +443,7 @@ class Trainer(object):
 
                 rewards = np.repeat(loss_adversarial, sentence_fake.size(1))
 
-                if 1:
+                if 0:
                     for action, r in zip(actions, rewards):
                         action.reinforce(float(r.data.cpu().numpy()[0]))
                     autograd.backward(actions, [None for _ in actions])

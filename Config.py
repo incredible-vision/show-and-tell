@@ -19,7 +19,7 @@ def parse_opt():
     parser.add_argument('--batch_size', type=int, default=128, help='batch size for training')
 
     parser.add_argument('--expr_dir', type=str, default='experiment', help='experiment directory')
-    parser.add_argument('--exp_id', type=str, default='cap_gan', help='experiment id')
+    parser.add_argument('--exp_id', type=str, default='show_tell', help='experiment id')
     parser.add_argument('--user_id', type=str, default='myunggi', help='user id')
     parser.add_argument('--start_from', type=str, default=None, help='continue from this configurations')
 
