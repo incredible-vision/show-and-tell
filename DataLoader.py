@@ -61,7 +61,7 @@ def collate_fn(data):
         targets[i, :end] = cap[:end]
     return images, targets, lengths, imgids
 
-def get_loader(opt, mode='train', shuffle=True, num_workers=1, transform=None):
+def get_loader(opt, mode='train', shuffle=True, num_workers=4, transform=None):
 
     coco = CocoDataset(root=opt.root_dir,
                        anns=opt.data_json,

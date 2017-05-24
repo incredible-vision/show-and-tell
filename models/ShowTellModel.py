@@ -43,14 +43,6 @@ class LSTMCustom(nn.Module):
 
         return h, (h, c)
 
-
-# lstmcore = LSTMCustom(256, 256, 0.5)
-# xt = Variable(torch.zeros([128, 256]))
-# state = (Variable(torch.zeros(128, 256)),
-#         Variable(torch.zeros(128, 256)))
-# res = lstmcore(xt, state)
-
-
 class ShowTellModel(nn.Module):
     """"" Implementation of Show and Tell Model for Image Captioning """""
     def __init__(self, opt):
@@ -127,10 +119,54 @@ class ShowTellModel(nn.Module):
         generated_sentence = torch.cat(actions, 1)
         return generated_sentence.squeeze(), actions
 
+    def sample_gumble_softmax(self, features, maxlen=20):
+
+        batch_size = features.size(0)
+        state = self.init_hidden(batch_size)
+
+        hidden, state = self.lstm(features.unsqueeze(0), state)
+        actions = []
+        word = Variable(torch.ones(batch_size).long()).cuda()
+        xt = self.embedding(word)
+        for t in range(maxlen):
+            hidden, state = self.lstm(xt.unsqueeze(0), state)
+            output = self.classifier(hidden.squeeze(0))
+            # Get a Stochastic Action (Stochastic Policy)
+            _, action = self.gumbel_softmax_sample(output)
+            actions.append(action)
+            xt = self.embedding(action.detach()).squeeze(1)
+
+        generated_sentence = torch.cat(actions, 1)
+        return generated_sentence.squeeze(), actions
+
+
     def getStochasticAction(self, output):
         distribution = F.softmax(output)
         action = distribution.multinomial()
         return action
+
+    def sample_gumbel(self, input):
+        noise = torch.rand(input.size())
+        eps = 1e-20
+        noise.add_(eps).log_().neg_()
+        noise.add_(eps).log_().neg_()
+        return Variable(noise).cuda()
+
+    def gumbel_softmax_sample(self, input):
+        temperature = 1
+        noise = self.sample_gumbel(input)
+        x = (input + noise) / temperature
+        x = F.softmax(x)
+
+        _, max_inx = torch.max(x, x.dim() - 1)
+        x_hard = torch.cuda.FloatTensor(x.size()).zero_().scatter_(x.dim() - 1, max_inx.data, 1.0)
+        x2 = x.clone()
+        tmp = Variable(x_hard - x2.data)
+        tmp.detach_()
+
+        x = tmp + x
+
+        return x.view_as(input), max_inx
 
     def init_hidden(self, batch_size):
         weight = next(self.parameters()).data

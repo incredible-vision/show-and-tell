@@ -54,6 +54,7 @@ class Trainer(object):
         self.criterion_MLE = nn.CrossEntropyLoss()
         self.criterion_G = nn.CrossEntropyLoss()
         self.criterion_D = nn.CrossEntropyLoss()
+        self.criterion_F = nn.SmoothL1Loss()
 
         """ only update trainable parameters """
         parameters = list(self.generator.parameters()) + list(self.encoder.parameters())
@@ -328,7 +329,8 @@ class Trainer(object):
         val_result_history = self.infos_disc.get('val_result_history', {})
         loss_history = self.infos_disc.get('loss_history', {})
         lr_history = self.infos_disc.get('lr_history', {})
-        train_loss_history = self.infos_disc.get('train_loss_history', {})
+        train_lossD_history = self.infos_disc.get('train_lossD_history', {})
+        train_lossG_history = self.infos_gen.get('train_lossG_history', {})
 
         if self.opt.load_best_score == True:
             best_val_score = self.infos_disc.get('best_val_score', None)
@@ -378,7 +380,7 @@ class Trainer(object):
                     sentence_real = sentence_real.cuda()
                     labels = labels.cuda()
 
-                logit = self.discriminator(sentence_real)
+                logit, feature_real = self.discriminator(sentence_real)
                 loss_real = self.criterion_D(logit, labels.long())
                 loss_real.backward()
 
@@ -390,9 +392,8 @@ class Trainer(object):
                 labels.data.fill_(self.fake_label)
                 if self.num_gpu > 0:
                     sentence_fake = sentence_fake.cuda()
-                    labels = labels.cuda()
 
-                logit = self.discriminator(sentence_fake)
+                logit, _ = self.discriminator(sentence_fake)
                 loss_fake = self.criterion_D(logit, labels.long())
                 loss_fake.backward()
                 total_loss = loss_real + loss_fake
@@ -403,20 +404,29 @@ class Trainer(object):
                 # Update Generator Network
                 #############################################################
                 features = self.encoder(images)
-                sentence_fake, actions = self.generator.sample_reinforce(features, maxlen=20)
-                # sentence_fake = sentence_fake.detach()
-
                 labels.data.fill_(self.real_label)
-                # if self.num_gpu > 0:
-                #     sentence_fake = sentence_fake.cuda()
-                #     labels = labels.cuda()
 
-                logit = self.discriminator(sentence_fake)
-                loss_adversarial = self.criterion_G(logit, labels)
+                if 1:
+                    sentence_fake, actions = self.generator.sample_reinforce(features, maxlen=20)
+                else:
+                    sentence_fack, actions = self.generator.sample_gumble_softmax(features, maxlen=20)
+
+                logit, feature_fake = self.discriminator(sentence_fake)
+
+                if 1:
+                    loss_feat = self.criterion_F(feature_real.detach(), feature_fake.detach())
+                    loss_adversarial = self.criterion_G(logit, labels) + loss_feat
+                else:
+                    loss_adversarial = self.criterion_G(logit, labels)
+
                 rewards = np.repeat(loss_adversarial, sentence_fake.size(1))
-                for action, r in zip(actions, rewards):
-                    action.reinforce(float(r.data.cpu().numpy()[0]))
-                autograd.backward(actions, [None for _ in actions])
+
+                if 1:
+                    for action, r in zip(actions, rewards):
+                        action.reinforce(float(r.data.cpu().numpy()[0]))
+                    autograd.backward(actions, [None for _ in actions])
+                else:
+                    loss_adversarial.backward()
 
                 self.optimizerG.step()
 
@@ -468,7 +478,8 @@ class Trainer(object):
                     self.infos_gen['val_result_history'] = val_result_history
                     self.infos_gen['loss_history'] = loss_history
                     self.infos_gen['lr_history'] = lr_history
-                    self.infos_gen['train_loss_history'] = train_loss_history
+                    self.infos_gen['train_lossD_history'] = train_lossD_history
+                    self.infos_gen['train_lossG_history'] = train_lossG_history
                     with open(os.path.join(self.opt.expr_dir, 'infos' + '.pkl'), 'wb') as f:
                         pickle.dump(self.infos_gen, f)
 
