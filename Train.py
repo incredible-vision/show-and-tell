@@ -35,7 +35,8 @@ class Trainer(object):
         self.validloader = validloader
 
         self.train_loss_win = None
-        self.train_perp_win = None
+        self.train_lossD_win = None
+        self.train_lossG_win = None
 
         self.real_label = 1
         self.fake_label = 0
@@ -396,25 +397,26 @@ class Trainer(object):
                 loss_real.backward()
 
                 # train with fake
-                captions_fake = Variable(torch.zeros(len(captions), max(lengths)).long())
+                captions_fake = torch.zeros(len(captions), max(lengths)).long()
 
                 features = self.encoder(images)
-                sentence_fake = self.generator.sample(features, maxlen=20)
+                sentence_fake = self.generator.sample(features, maxlen=max(lengths))
 
                 for batch, sentence_ids in enumerate(sentence_fake):
 
                     for i, word_id in enumerate(sentence_ids):
-                        if word_id.data.cpu().numpy()[0] == 2:
+                        if word_id.data.cpu().numpy()[0] == 2 or i == max(lengths):
                             break
                         # sampled_caption.append(word_id)
-                    captions_fake[batch, :i] = sentence_ids[:i]
+                    captions_fake[batch, :i] = sentence_ids.data[:i]
 
-                sentence_fake = captions_fake.detach()
+                sentence_fake = Variable(captions_fake)
 
                 labels.data.fill_(self.fake_label)
                 if self.num_gpu > 0:
                     sentence_fake = sentence_fake.cuda()
 
+                # sentence_fake = self.generator.embedding(sentence_fake)
                 logit, _ = self.discriminator(sentence_fake)
                 loss_fake = self.criterion_D(logit, labels.long())
                 loss_fake.backward()
@@ -425,17 +427,32 @@ class Trainer(object):
                 #############################################################
                 # Update Generator Network
                 #############################################################
+                self.generator.zero_grad()
                 features = self.encoder(images)
                 labels.data.fill_(self.real_label)
 
-                if 0:
-                    sentence_fake, actions = self.generator.sample_reinforce(features, maxlen=20)
+                if 1:
+                    sentence_fake, actions = self.generator.sample_reinforce(features, maxlen=max(lengths))
                 else:
-                    sentence_fack, actions = self.generator.sample_gumble_softmax(features, maxlen=20)
+                    sentence_fake, actions = self.generator.sample_gumble_softmax(features, maxlen=(max(lengths)))
+
+                captions_fake = torch.zeros(len(captions), max(lengths)).long()
+
+                for batch, sentence_ids in enumerate(sentence_fake):
+
+                    for i, word_id in enumerate(sentence_ids):
+                        if word_id.data.cpu().numpy()[0] == 2 or i == max(lengths):
+                            break
+                        # sampled_caption.append(word_id)
+                    captions_fake[batch, :i] = sentence_ids.data[:i]
+
+                sentence_fake = Variable(captions_fake)
+                if self.num_gpu > 0:
+                    sentence_fake = sentence_fake.cuda()
 
                 logit, feature_fake = self.discriminator(sentence_fake)
 
-                if 1:
+                if 0:
                     loss_feat = self.criterion_F(feature_real.detach(), feature_fake.detach())
                     loss_adversarial = self.criterion_G(logit, labels) + loss_feat
                 else:
@@ -443,7 +460,7 @@ class Trainer(object):
 
                 rewards = np.repeat(loss_adversarial, sentence_fake.size(1))
 
-                if 0:
+                if 1:
                     for action, r in zip(actions, rewards):
                         action.reinforce(float(r.data.cpu().numpy()[0]))
                     autograd.backward(actions, [None for _ in actions])
@@ -456,8 +473,10 @@ class Trainer(object):
                     print('Epoch [%d/%d], Step [%d/%d], Discriminator Loss: %.4f, Generator Loss: %.4f'
                           % (epoch, self.opt.max_epochs, iter, self.total_train_iter,
                              total_loss.data[0], loss_adversarial.data[0]))
-                    # train_loss_history[total_iteration] = {'loss': total_loss.data[0]}
-                    # self.train_loss_win = visualize_loss(self.train_loss_win, train_loss_history, 'train_discriminator_loss', 'loss')
+                    train_lossD_history[total_iteration] = {'loss': total_loss.data[0]}
+                    train_lossG_history[total_iteration] = {'loss': loss_adversarial.data[0]}
+                    self.train_lossD_win = visualize_loss(self.train_lossD_win, train_lossD_history, 'adversarial_discriminator_loss', 'loss')
+                    self.train_lossG_win = visualize_loss(self.train_lossG_win, train_lossG_history, 'adversarial_generator_loss', 'loss')
                 if (total_iteration % self.opt.save_checkpoint_every == 0):
                     print('start evaluating ...')
                     val_loss, predictions, lang_stats = evaluation((self.encoder, self.generator), self.criterion_MLE,
