@@ -284,7 +284,9 @@ class Trainer(object):
                 # torch.cuda.synchronize()
                 # start = time.time()
 
-                logit, _ = self.discriminator(sentence_real)
+                features = self.encoder(images)
+                # sentence_real = self.generator.embedding(sentence_real)
+                logit, _ = self.discriminator(sentence_real, features.detach())
                 loss_real = self.criterion_D(logit, labels.long())
                 loss_real.backward()
 
@@ -292,7 +294,6 @@ class Trainer(object):
                 # train with fake
                 captions_fake = Variable(torch.zeros(len(captions), max(lengths)).long())
 
-                features = self.encoder(images)
                 sentence_fake = self.generator.sample(features.detach(), maxlen=20)
 
                 for batch, sentence_ids in enumerate(sentence_fake):
@@ -305,12 +306,15 @@ class Trainer(object):
 
                 sentence_fake = captions_fake.detach()
 
+
                 labels.data.fill_(self.fake_label)
                 if self.num_gpu > 0:
                     sentence_fake = sentence_fake.cuda()
                     # labels = labels.cuda()
 
-                logit, _ = self.discriminator(sentence_fake)
+                # sentence_fake = self.generator.embedding(sentence_fake)
+
+                logit, _ = self.discriminator(sentence_fake, features.detach())
                 loss_fake = self.criterion_D(logit, labels.long())
                 loss_fake.backward()
                 total_loss = loss_real + loss_fake
@@ -356,6 +360,8 @@ class Trainer(object):
             for group in optimizer.param_groups:
                 group['lr'] = lr
 
+        disc_loss_indicator = 2.
+        gen_loss_indicator = 10.
 
         for epoch in range(loaded_epoch + 1, 1 + self.opt.max_epochs):
 
@@ -377,12 +383,6 @@ class Trainer(object):
                 #############################################################
                 # Update Discriminator Network
                 #############################################################
-                self.encoder.zero_grad()
-                self.discriminator.zero_grad()
-                self.generator.zero_grad()
-
-                # train with real
-                # image_inputs.data.resize_(images.size()).copy_(images)
                 images = Variable(images, volatile=False)
                 sentence_real = Variable(captions, volatile=False)
                 labels = Variable(torch.zeros(images.size(0)).fill_(self.real_label)).long()
@@ -392,82 +392,95 @@ class Trainer(object):
                     sentence_real = sentence_real.cuda()
                     labels = labels.cuda()
 
-                logit, feature_real = self.discriminator(sentence_real)
-                loss_real = self.criterion_D(logit, labels.long())
-                loss_real.backward()
+                if disc_loss_indicator > 1.:
+                    self.encoder.zero_grad()
+                    self.discriminator.zero_grad()
+                    self.generator.zero_grad()
 
-                # train with fake
-                captions_fake = torch.zeros(len(captions), max(lengths)).long()
+                    # train with real
+                    # image_inputs.data.resize_(images.size()).copy_(images)
 
-                features = self.encoder(images)
-                sentence_fake = self.generator.sample(features, maxlen=max(lengths))
+                    logit, feature_real = self.discriminator(sentence_real)
+                    loss_real = self.criterion_D(logit, labels.long())
+                    loss_real.backward()
 
-                for batch, sentence_ids in enumerate(sentence_fake):
+                    # train with fake
+                    captions_fake = torch.zeros(len(captions), max(lengths)).long()
 
-                    for i, word_id in enumerate(sentence_ids):
-                        if word_id.data.cpu().numpy()[0] == 2 or i == max(lengths):
-                            break
-                        # sampled_caption.append(word_id)
-                    captions_fake[batch, :i] = sentence_ids.data[:i]
+                    features = self.encoder(images)
+                    sentence_fake = self.generator.sample(features, maxlen=max(lengths))
 
-                sentence_fake = Variable(captions_fake)
+                    for batch, sentence_ids in enumerate(sentence_fake):
 
-                labels.data.fill_(self.fake_label)
-                if self.num_gpu > 0:
-                    sentence_fake = sentence_fake.cuda()
+                        for i, word_id in enumerate(sentence_ids):
+                            if word_id.data.cpu().numpy()[0] == 2 or i == max(lengths):
+                                break
+                            # sampled_caption.append(word_id)
+                        captions_fake[batch, :i] = sentence_ids.data[:i]
 
-                # sentence_fake = self.generator.embedding(sentence_fake)
-                logit, _ = self.discriminator(sentence_fake)
-                loss_fake = self.criterion_D(logit, labels.long())
-                loss_fake.backward()
-                total_loss = loss_real + loss_fake
+                    sentence_fake = Variable(captions_fake)
 
-                self.optimizerD.step()
+                    labels.data.fill_(self.fake_label)
+                    if self.num_gpu > 0:
+                        sentence_fake = sentence_fake.cuda()
+
+                    # sentence_fake = self.generator.embedding(sentence_fake)
+                    logit, _ = self.discriminator(sentence_fake)
+                    loss_fake = self.criterion_D(logit, labels.long())
+                    loss_fake.backward()
+                    total_loss = loss_real + loss_fake
+
+                    disc_loss_indicator = total_loss.data[0]
+                    self.optimizerD.step()
 
                 #############################################################
                 # Update Generator Network
                 #############################################################
-                self.generator.zero_grad()
-                features = self.encoder(images)
-                labels.data.fill_(self.real_label)
+                if gen_loss_indicator > 2. :
+                    self.encoder.zero_grad()
+                    self.discriminator.zero_grad()
+                    self.generator.zero_grad()
+                    features = self.encoder(images)
+                    labels.data.fill_(self.real_label)
 
-                if 1:
-                    sentence_fake, actions = self.generator.sample_reinforce(features, maxlen=max(lengths))
-                else:
-                    sentence_fake, actions = self.generator.sample_gumble_softmax(features, maxlen=(max(lengths)))
+                    if 1:
+                        sentence_fake, actions = self.generator.sample_reinforce(features, maxlen=max(lengths))
+                    else:
+                        sentence_fake, actions = self.generator.sample_gumble_softmax(features, maxlen=(max(lengths)))
 
-                captions_fake = torch.zeros(len(captions), max(lengths)).long()
+                    captions_fake = torch.zeros(len(captions), max(lengths)).long()
 
-                for batch, sentence_ids in enumerate(sentence_fake):
+                    for batch, sentence_ids in enumerate(sentence_fake):
 
-                    for i, word_id in enumerate(sentence_ids):
-                        if word_id.data.cpu().numpy()[0] == 2 or i == max(lengths):
-                            break
-                        # sampled_caption.append(word_id)
-                    captions_fake[batch, :i] = sentence_ids.data[:i]
+                        for i, word_id in enumerate(sentence_ids):
+                            if word_id.data.cpu().numpy()[0] == 2 or i == max(lengths):
+                                break
+                            # sampled_caption.append(word_id)
+                        captions_fake[batch, :i] = sentence_ids.data[:i]
 
-                sentence_fake = Variable(captions_fake)
-                if self.num_gpu > 0:
-                    sentence_fake = sentence_fake.cuda()
+                    sentence_fake = Variable(captions_fake)
+                    if self.num_gpu > 0:
+                        sentence_fake = sentence_fake.cuda()
 
-                logit, feature_fake = self.discriminator(sentence_fake)
+                    logit, feature_fake = self.discriminator(sentence_fake)
 
-                if 0:
-                    loss_feat = self.criterion_F(feature_real.detach(), feature_fake.detach())
-                    loss_adversarial = self.criterion_G(logit, labels) + loss_feat
-                else:
-                    loss_adversarial = self.criterion_G(logit, labels)
+                    if 0:
+                        loss_feat = self.criterion_F(feature_real.detach(), feature_fake.detach())
+                        loss_adversarial = self.criterion_G(logit, labels) + loss_feat
+                    else:
+                        loss_adversarial = self.criterion_G(logit, labels)
 
-                rewards = np.repeat(loss_adversarial, sentence_fake.size(1))
+                    rewards = np.repeat(loss_adversarial, sentence_fake.size(1))
 
-                if 1:
-                    for action, r in zip(actions, rewards):
-                        action.reinforce(float(r.data.cpu().numpy()[0]))
-                    autograd.backward(actions, [None for _ in actions])
-                else:
-                    loss_adversarial.backward()
+                    if 1:
+                        for action, r in zip(actions, rewards):
+                            action.reinforce(float(r.data.cpu().numpy()[0]))
+                        autograd.backward(actions, [None for _ in actions])
+                    else:
+                        loss_adversarial.backward()
 
-                self.optimizerG.step()
+                    gen_loss_indicator = loss_adversarial.data[0]
+                    self.optimizerG.step()
 
                 if iter % self.opt.log_step == 0:
                     print('Epoch [%d/%d], Step [%d/%d], Discriminator Loss: %.4f, Generator Loss: %.4f'

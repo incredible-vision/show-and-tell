@@ -50,7 +50,7 @@ def parse_opt():
 
     parser.add_argument('--language_eval', type=int, default=1, help='1 for Cider score, 0 for log loss')
 
-    parser.add_argument('--save_checkpoint_every', type=int, default=1000, help='how often to save a model checkpoint (in iterations)?')
+    parser.add_argument('--save_checkpoint_every', type=int, default=500, help='how often to save a model checkpoint (in iterations)?')
 
     args = parser.parse_args()
 
