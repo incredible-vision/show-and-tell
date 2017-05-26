@@ -1,1 +1,6 @@
 data/
+*.pyc
+cache/
+pycocoevalcap/
+visualizer/
+experiment/
