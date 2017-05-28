@@ -44,3 +44,9 @@ class EncoderCNN_F(nn.Module):
     def finetune(self, allow=False):
         for param in self.cnn.parameters():
             param.requires_grad = True if allow else False
+
+class Encoder3DCNN(nn.Module):
+    """"""
+
+class EncoderRNN(nn.Module):
+    """"""

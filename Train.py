@@ -270,7 +270,7 @@ class Trainer(object):
                 # image_inputs.data.resize_(images.size()).copy_(images)
                 # image_inputs.data.resize_(image_inputs.size()).copy_(images)
                 images = Variable(images, volatile=False)
-                sentence_real = Variable(captions, volatile=False)
+                sentence_real = Variable(captions[:, 1:-1], volatile=False)
                 # labels.data.resize_(labels.size()).fill_(self.real_label)
                 labels = Variable(torch.zeros(images.size(0)).fill_(self.real_label)).long()
                 # images = Variable(images)
@@ -292,14 +292,14 @@ class Trainer(object):
 
 
                 # train with fake
-                captions_fake = Variable(torch.zeros(len(captions), max(lengths)).long())
+                captions_fake = Variable(torch.zeros(len(captions), max(lengths)-2).long())
 
                 sentence_fake = self.generator.sample(features.detach(), maxlen=20)
 
                 for batch, sentence_ids in enumerate(sentence_fake):
 
                     for i, word_id in enumerate(sentence_ids):
-                        if word_id.data.cpu().numpy()[0] == 2 or i == max(lengths):
+                        if word_id.data.cpu().numpy()[0] == 2 or i == (max(lengths)-2):
                             break
 
                     captions_fake[batch, :i] = sentence_ids[:i]
@@ -374,6 +374,7 @@ class Trainer(object):
                 self.opt.current_lr = self.opt.learning_rate
 
             self.discriminator.train()
+            self.generator.train()
 
             for iter, (images, captions, lengths, imgids) in enumerate(self.trainloader):
 
@@ -384,7 +385,7 @@ class Trainer(object):
                 # Update Discriminator Network
                 #############################################################
                 images = Variable(images, volatile=False)
-                sentence_real = Variable(captions, volatile=False)
+                sentence_real = Variable(captions[:, 1:-1], volatile=False)
                 labels = Variable(torch.zeros(images.size(0)).fill_(self.real_label)).long()
 
                 if self.num_gpu > 0:
@@ -405,7 +406,7 @@ class Trainer(object):
                 loss_real.backward()
 
                 # train with fake
-                captions_fake = torch.zeros(len(captions), max(lengths)).long()
+                captions_fake = torch.zeros(len(captions), max(lengths) - 2).long()
 
                 features = self.encoder(images)
                 sentence_fake = self.generator.sample(features, maxlen=max(lengths))
@@ -413,9 +414,9 @@ class Trainer(object):
                 for batch, sentence_ids in enumerate(sentence_fake):
 
                     for i, word_id in enumerate(sentence_ids):
-                        if word_id.data.cpu().numpy()[0] == 2 or i == max(lengths):
+                        if word_id.data.cpu().numpy()[0] == 2 or i == (max(lengths) - 2):
                             break
-                        # sampled_caption.append(word_id)
+                            # sampled_caption.append(word_id)
                     captions_fake[batch, :i] = sentence_ids.data[:i]
 
                 sentence_fake = Variable(captions_fake)
@@ -448,14 +449,13 @@ class Trainer(object):
                 else:
                     sentence_fake, actions = self.generator.sample_gumble_softmax(features, maxlen=(max(lengths)))
 
-                captions_fake = torch.zeros(len(captions), max(lengths)).long()
+                captions_fake = torch.zeros(len(captions), max(lengths) - 2).long()
 
                 for batch, sentence_ids in enumerate(sentence_fake):
-
                     for i, word_id in enumerate(sentence_ids):
-                        if word_id.data.cpu().numpy()[0] == 2 or i == max(lengths):
+                        if word_id.data.cpu().numpy()[0] == 2 or i == (max(lengths) - 2):
                             break
-                        # sampled_caption.append(word_id)
+                            # sampled_caption.append(word_id)
                     captions_fake[batch, :i] = sentence_ids.data[:i]
 
                 sentence_fake = Variable(captions_fake)
@@ -470,11 +470,13 @@ class Trainer(object):
                 else:
                     loss_adversarial = self.criterion_G(logit, labels)
 
-                rewards = np.repeat(loss_adversarial, sentence_fake.size(1))
-
+                rewards = np.repeat(loss_adversarial, sentence_fake.size(1) + 2)
                 if 1:
                     for action, r in zip(actions, rewards):
-                        action.reinforce(float(r.data.cpu().numpy()[0]))
+                        # action.reinforce(float(r.data.cpu().numpy()[0]))
+                        tmp = (
+                        (action.detach().data > 2).type('torch.cuda.FloatTensor') * r.data.expand(action.data.size()))
+                        action.reinforce(tmp)
                     autograd.backward(actions, [None for _ in actions])
                 else:
                     loss_adversarial.backward()
