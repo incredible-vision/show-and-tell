@@ -385,7 +385,7 @@ class Trainer(object):
                 # Update Discriminator Network
                 #############################################################
                 images = Variable(images, volatile=False)
-                sentence_real = Variable(captions[:, 1:-1], volatile=False)
+                sentence_real = Variable(captions[:, 1:], volatile=False)
                 labels = Variable(torch.zeros(images.size(0)).fill_(self.real_label)).long()
 
                 if self.num_gpu > 0:
@@ -406,7 +406,7 @@ class Trainer(object):
                 loss_real.backward()
 
                 # train with fake
-                captions_fake = torch.zeros(len(captions), max(lengths) - 2).long()
+                captions_fake = torch.zeros(len(captions), max(lengths) - 1).long()
 
                 features = self.encoder(images)
                 sentence_fake = self.generator.sample(features, maxlen=max(lengths))
@@ -414,7 +414,7 @@ class Trainer(object):
                 for batch, sentence_ids in enumerate(sentence_fake):
 
                     for i, word_id in enumerate(sentence_ids):
-                        if word_id.data.cpu().numpy()[0] == 2 or i == (max(lengths) - 2):
+                        if word_id.data.cpu().numpy()[0] == 2 or i == (max(lengths) - 1):
                             break
                             # sampled_caption.append(word_id)
                     captions_fake[batch, :i] = sentence_ids.data[:i]
@@ -449,11 +449,11 @@ class Trainer(object):
                 else:
                     sentence_fake, actions = self.generator.sample_gumble_softmax(features, maxlen=(max(lengths)))
 
-                captions_fake = torch.zeros(len(captions), max(lengths) - 2).long()
+                captions_fake = torch.zeros(len(captions), max(lengths) - 1).long()
 
                 for batch, sentence_ids in enumerate(sentence_fake):
                     for i, word_id in enumerate(sentence_ids):
-                        if word_id.data.cpu().numpy()[0] == 2 or i == (max(lengths) - 2):
+                        if word_id.data.cpu().numpy()[0] == 2 or i == (max(lengths) - 1):
                             break
                             # sampled_caption.append(word_id)
                     captions_fake[batch, :i] = sentence_ids.data[:i]
@@ -475,7 +475,7 @@ class Trainer(object):
                     for action, r in zip(actions, rewards):
                         # action.reinforce(float(r.data.cpu().numpy()[0]))
                         tmp = (
-                        (action.detach().data > 2).type('torch.cuda.FloatTensor') * r.data.expand(action.data.size()))
+                        (action.detach().data > 1).type('torch.cuda.FloatTensor') * r.data.expand(action.data.size()))
                         action.reinforce(tmp)
                     autograd.backward(actions, [None for _ in actions])
                 else:
