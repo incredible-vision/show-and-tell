@@ -55,7 +55,7 @@ class ShowTellModel(nn.Module):
         self.ss_prob = 0.0
 
         # Define decoder
-        self.embedding = nn.Embedding(self.vocab_size, self.embed_size)
+        self.embedding = nn.Embedding(self.vocab_size, self.embed_size, padding_idx=0)
         self.lstm = nn.LSTM(self.embed_size, self.hidden_size, self.num_layers, batch_first=False)
         self.classifier = nn.Linear(self.hidden_size, self.vocab_size)
 
@@ -73,6 +73,7 @@ class ShowTellModel(nn.Module):
             xt = captions[:, t, :]
             hidden, state = self.lstm(xt.unsqueeze(0), state)
             output = self.classifier(hidden.squeeze(0))
+            end_output = self.classifier_end_token(hidden.squeeze(0))
             outputs.append(output)
 
         # outputs = torch.cat(outputs, 0)

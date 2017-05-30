@@ -270,7 +270,7 @@ class Trainer(object):
                 # image_inputs.data.resize_(images.size()).copy_(images)
                 # image_inputs.data.resize_(image_inputs.size()).copy_(images)
                 images = Variable(images, volatile=False)
-                sentence_real = Variable(captions[:, 1:-1], volatile=False)
+                sentence_real = Variable(captions[:, 1:], volatile=False)
                 # labels.data.resize_(labels.size()).fill_(self.real_label)
                 labels = Variable(torch.zeros(images.size(0)).fill_(self.real_label)).long()
                 # images = Variable(images)
@@ -292,7 +292,7 @@ class Trainer(object):
 
 
                 # train with fake
-                captions_fake = Variable(torch.zeros(len(captions), max(lengths)-2).long())
+                captions_fake = Variable(torch.zeros(len(captions), max(lengths)-1).long())
 
                 sentence_fake = self.generator.sample(features.detach(), maxlen=20)
 
@@ -303,6 +303,7 @@ class Trainer(object):
                             break
 
                     captions_fake[batch, :i] = sentence_ids[:i]
+                    captions_fake[batch, i] = 2
 
                 sentence_fake = captions_fake.detach()
 
@@ -408,16 +409,17 @@ class Trainer(object):
                 # train with fake
                 captions_fake = torch.zeros(len(captions), max(lengths) - 1).long()
 
-                features = self.encoder(images)
+                # features = self.encoder(images)
                 sentence_fake = self.generator.sample(features, maxlen=max(lengths))
 
                 for batch, sentence_ids in enumerate(sentence_fake):
 
                     for i, word_id in enumerate(sentence_ids):
-                        if word_id.data.cpu().numpy()[0] == 2 or i == (max(lengths) - 1):
+                        if word_id.data.cpu().numpy()[0] == 2 or i == (max(lengths) - 2):
                             break
                             # sampled_caption.append(word_id)
                     captions_fake[batch, :i] = sentence_ids.data[:i]
+                    captions_fake[batch, i] = 2
 
                 sentence_fake = Variable(captions_fake)
 
@@ -453,10 +455,11 @@ class Trainer(object):
 
                 for batch, sentence_ids in enumerate(sentence_fake):
                     for i, word_id in enumerate(sentence_ids):
-                        if word_id.data.cpu().numpy()[0] == 2 or i == (max(lengths) - 1):
+                        if word_id.data.cpu().numpy()[0] == 2 or i == (max(lengths) - 2):
                             break
                             # sampled_caption.append(word_id)
                     captions_fake[batch, :i] = sentence_ids.data[:i]
+                    captions_fake[batch, i] = 2
 
                 sentence_fake = Variable(captions_fake)
                 if self.num_gpu > 0:
