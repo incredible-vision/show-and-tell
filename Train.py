@@ -294,16 +294,13 @@ class Trainer(object):
                 # train with fake
                 captions_fake = Variable(torch.zeros(len(captions), max(lengths)-1).long())
 
-                sentence_fake = self.generator.sample(features.detach(), maxlen=20)
+                sentence_fake = self.generator.sample(features.detach(), maxlen=max(lengths)-1)
 
                 for batch, sentence_ids in enumerate(sentence_fake):
-
+                    captions_fake[batch, i] = sentence_ids[i]
                     for i, word_id in enumerate(sentence_ids):
-                        if word_id.data.cpu().numpy()[0] == 2 or i == (max(lengths)-2):
+                        if word_id.data.cpu().numpy()[0] == 2:
                             break
-
-                    captions_fake[batch, :i] = sentence_ids[:i]
-                    captions_fake[batch, i] = 2
 
                 sentence_fake = captions_fake.detach()
 
@@ -455,7 +452,7 @@ class Trainer(object):
 
                 for batch, sentence_ids in enumerate(sentence_fake):
                     for i, word_id in enumerate(sentence_ids):
-                        if word_id.data.cpu().numpy()[0] == 2 or i == (max(lengths) - 2):
+                        if word_id.data.cpu().numpy()[0] == 2 or i == (max(lengths) - 1):
                             break
                             # sampled_caption.append(word_id)
                     captions_fake[batch, :i] = sentence_ids.data[:i]
