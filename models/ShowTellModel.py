@@ -73,7 +73,7 @@ class ShowTellModel(nn.Module):
             xt = captions[:, t, :]
             hidden, state = self.lstm(xt.unsqueeze(0), state)
             output = self.classifier(hidden.squeeze(0))
-            end_output = self.classifier_end_token(hidden.squeeze(0))
+            # end_output = self.classifier_end_token(hidden.squeeze(0))
             outputs.append(output)
 
         # outputs = torch.cat(outputs, 0)

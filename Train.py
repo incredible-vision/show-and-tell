@@ -67,7 +67,7 @@ class Trainer(object):
         self.optimizerG = optim.Adam(parameters, lr=opt.learning_rate)
 
         parameters = filter(lambda p: p.requires_grad, self.discriminator.parameters())
-        self.optimizerD = optim.Adam(parameters, lr=5e-6)
+        self.optimizerD = optim.Adam(parameters, lr=5e-5)
 
         if opt.start_from :
             continue_path = os.path.join(opt.root_dir, 'experiment', opt.user_id, opt.exp_id,'optimizer.pth')
@@ -285,7 +285,7 @@ class Trainer(object):
                 # start = time.time()
 
                 features = self.encoder(images)
-                # sentence_real = self.generator.embedding(sentence_real)
+                sentence_real = self.generator.embedding(sentence_real)
                 logit, _ = self.discriminator(sentence_real, features.detach())
                 loss_real = self.criterion_D(logit, labels.long())
                 loss_real.backward()
@@ -297,8 +297,8 @@ class Trainer(object):
                 sentence_fake = self.generator.sample(features.detach(), maxlen=max(lengths)-1)
 
                 for batch, sentence_ids in enumerate(sentence_fake):
-                    captions_fake[batch, i] = sentence_ids[i]
                     for i, word_id in enumerate(sentence_ids):
+                        captions_fake[batch, i] = sentence_ids[i]
                         if word_id.data.cpu().numpy()[0] == 2:
                             break
 
@@ -310,7 +310,7 @@ class Trainer(object):
                     sentence_fake = sentence_fake.cuda()
                     # labels = labels.cuda()
 
-                # sentence_fake = self.generator.embedding(sentence_fake)
+                sentence_fake = self.generator.embedding(sentence_fake)
 
                 logit, _ = self.discriminator(sentence_fake, features.detach())
                 loss_fake = self.criterion_D(logit, labels.long())
@@ -404,21 +404,19 @@ class Trainer(object):
                 loss_real.backward()
 
                 # train with fake
-                captions_fake = torch.zeros(len(captions), max(lengths) - 1).long()
+                captions_fake = Variable(torch.zeros(len(captions), max(lengths) - 1).long())
 
                 # features = self.encoder(images)
-                sentence_fake = self.generator.sample(features, maxlen=max(lengths))
+                sentence_fake = self.generator.sample(features, maxlen=max(lengths)-1)
 
                 for batch, sentence_ids in enumerate(sentence_fake):
-
                     for i, word_id in enumerate(sentence_ids):
-                        if word_id.data.cpu().numpy()[0] == 2 or i == (max(lengths) - 2):
+                        captions_fake[batch, i] = sentence_ids[i]
+                        if word_id.data.cpu().numpy()[0] == 2:
                             break
-                            # sampled_caption.append(word_id)
-                    captions_fake[batch, :i] = sentence_ids.data[:i]
-                    captions_fake[batch, i] = 2
 
-                sentence_fake = Variable(captions_fake)
+                # sentence_fake = Variable(captions_fake)
+                sentence_fake = captions_fake.detach()
 
                 labels.data.fill_(self.fake_label)
                 if self.num_gpu > 0:
@@ -444,25 +442,24 @@ class Trainer(object):
                 labels.data.fill_(self.real_label)
 
                 if 1:
-                    sentence_fake, actions = self.generator.sample_reinforce(features, maxlen=max(lengths))
+                    sentence_fake, actions = self.generator.sample_reinforce(features, maxlen=max(lengths)-1)
                 else:
                     sentence_fake, actions = self.generator.sample_gumble_softmax(features, maxlen=(max(lengths)))
 
-                captions_fake = torch.zeros(len(captions), max(lengths) - 1).long()
+                captions_fake = Variable(torch.zeros(len(captions), max(lengths) - 1).long())
 
                 for batch, sentence_ids in enumerate(sentence_fake):
                     for i, word_id in enumerate(sentence_ids):
-                        if word_id.data.cpu().numpy()[0] == 2 or i == (max(lengths) - 1):
+                        captions_fake[batch, i] = sentence_ids[i]
+                        if word_id.data.cpu().numpy()[0] == 2:
                             break
-                            # sampled_caption.append(word_id)
-                    captions_fake[batch, :i] = sentence_ids.data[:i]
-                    captions_fake[batch, i] = 2
 
-                sentence_fake = Variable(captions_fake)
+                # sentence_fake = Variable(captions_fake)
+
                 if self.num_gpu > 0:
-                    sentence_fake = sentence_fake.cuda()
+                    captions_fake = captions_fake.cuda()
 
-                logit, feature_fake = self.discriminator(sentence_fake, features.detach())
+                logit, feature_fake = self.discriminator(captions_fake.detach(), features.detach())
 
                 if 0:
                     loss_feat = self.criterion_F(feature_real.detach(), feature_fake.detach())
@@ -548,9 +545,6 @@ class Trainer(object):
                         print("model saved to {}".format(checkpoint_path))
                         with open(os.path.join(self.opt.expr_dir, 'infos' + '-best.pkl'), 'wb') as f:
                             pickle.dump(self.infos_gen, f)
-
-
-
 
 
 if __name__ == '__main__':

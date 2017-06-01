@@ -25,8 +25,8 @@ def model_setup(opt, model_name):
         opt.start_from = False
         model = ShowAttendTellModel(opt)
     elif model_name == 'discriminator':
-        opt.pretrain_path = os.path.join('experiment', opt.user_id, 'show_tell', 'model-discriminator.pth')
-        # opt.pretrain_path = None
+        # opt.pretrain_path = os.path.join('experiment', opt.user_id, 'cap_gan', 'model-discriminator.pth')
+        opt.pretrain_path = None
         opt.start_from = None
         model = Discriminator(opt)
     elif model_name == 'cnn_encoder':

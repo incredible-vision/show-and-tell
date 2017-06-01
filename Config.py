@@ -19,7 +19,7 @@ def parse_opt():
     parser.add_argument('--batch_size', type=int, default=64, help='batch size for training')
 
     parser.add_argument('--expr_dir', type=str, default='experiment', help='experiment directory')
-    parser.add_argument('--exp_id', type=str, default='cap_gan', help='experiment id')
+    parser.add_argument('--exp_id', type=str, default='discriminator_wo_embedding', help='experiment id')
     parser.add_argument('--user_id', type=str, default='myunggi', help='user id')
     parser.add_argument('--start_from', type=str, default=None, help='continue from this configurations')
 
@@ -33,7 +33,7 @@ def parse_opt():
     parser.add_argument('--load_optim_path', action="store_true", default=False)
     parser.add_argument('--load_pretrained', action='store_false', default=False)
 
-    parser.add_argument('--learning_rate', type=float, default=5e-6)
+    parser.add_argument('--learning_rate', type=float, default=1e-5)
     parser.add_argument('--max_epochs', type=int, default=120)
 
     parser.add_argument('--learning_rate_decay_start', type=int, default=1, help='at what iteration to start decaying learning rate? (-1 = dont) (in epoch)')
