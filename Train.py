@@ -10,7 +10,7 @@ import json
 from torch.autograd import Variable
 import torch.optim as optim
 from torch.nn.utils.rnn import pack_padded_sequence
-import math
+import torch.nn.functional as F
 from torchvision import transforms
 
 from DataLoader import get_loader
@@ -511,8 +511,11 @@ class Trainer_GAN(object):
             self.vocab = pickle.load(f)
             opt.vocab_size = len(self.vocab)
 
-        if mode == 'GAN_pretrain':
-            (self.model_G, self.model_D), self.infos = model_setup_2(opt, model_name='ShowAttendTellModel_GAN_pretrain')
+        if mode == 'GAN_G_pretrain':
+            (self.model_G, self.model_D), self.infos = model_setup_2(opt, model_name='ShowAttendTellModel_G_pretrain')
+
+        elif mode == 'GAN_D_pretrain':
+            (self.model_G, self.model_D), self.infos = model_setup_2(opt, model_name='ShowAttendTellModel_D_pretrain')
 
         elif mode == 'GAN_train':
             (self.model_G, self.model_D), self.infos = model_setup_2(opt, model_name='ShowAttendTellModel_GAN')
@@ -524,13 +527,14 @@ class Trainer_GAN(object):
 
         """ This criterion combines LogSoftMax and NLLLoss in one single class """
         self.criterion_G = nn.CrossEntropyLoss(size_average=True)
-        self.criterion_D = nn.BCELoss(size_average=True)
+        #self.criterion_D = nn.BCELoss(size_average=True)
+        self.criterion_D = nn.CrossEntropyLoss(size_average=True)
 
         """ only update trainable parameters """
         G_parameters = filter(lambda p: p.requires_grad, self.model_G.parameters())
         D_parameters = filter(lambda p: p.requires_grad, self.model_D.parameters())
         self.G_optimizer = optim.Adam(G_parameters, lr=opt.learning_rate)
-        self.D_optimizer = optim.Adam(D_parameters, lr=opt.learning_rate*1e-2)
+        self.D_optimizer = optim.Adam(D_parameters, lr=opt.learning_rate*1e-1)
 
         print('done')
 
@@ -604,7 +608,7 @@ class Trainer_GAN(object):
                 # or get maximum sequence length in ground truth captions
                 seqlen = self.seqlen if self.seqlen is not None else lengths[0]
 
-                outputs, _, _, _ = self.model_G(images, captions[:,:-1], seqlen, train_MLE=True)
+                outputs = self.model_G(images, captions[:,:-1], seqlen, train_MLE=True)
                 outputs = convertOutputVariable(outputs, seqlen, lengths)
 
                 loss = self.criterion_G(outputs, targets)
@@ -673,7 +677,95 @@ class Trainer_GAN(object):
                             pickle.dump(self.infos, f)
 
     ###############################################################################################
-    ############################# STEP 2. Training Adversarial model ##############################
+    ############################# STEP 2. Pretrain Discriminator model ############################
+    ###############################################################################################
+
+    def train_discriminator(self):
+
+        total_iteration = self.infos.get('total_iter', 0)
+        loaded_iteration = self.infos.get('iter', 0)
+        loaded_epoch = self.infos.get('epoch', 0)
+        train_loss_history = self.infos.get('train_loss_history', {})
+
+        for epoch in range(loaded_epoch + 1, 1 + self.opt.max_epochs):
+
+            self.model_D.train()
+            self.model_G.train()
+
+            for iter, (images, captions, lengths, cocoids) in enumerate(self.trainloader):
+
+                iter += 1
+                total_iteration += 1
+                if iter <= loaded_iteration: continue
+
+                torch.cuda.synchronize()
+
+                # Set mini-batch dataset
+                images = Variable(images).cuda()
+                captions = Variable(captions).cuda()
+
+                lengths = [l - 1 for l in lengths]
+
+                ################################################
+                # (1) Pretrain D network
+                # : (1-1) Fake sentence (1-2) Real sentence
+                ################################################
+
+                self.model_D.zero_grad()
+                f_sentences, f_sentences_word_emb = self.model_G.sample_for_D(images, mode='greedy')  # ([128, 20])/ ([128,512]x20)
+                f_sentences, f_sentences_word_emb = self.model_G.pad_after_EOS(f_sentences)
+
+                r_sentences, r_sentences_word_emb = self.model_G.gt_sentences(captions)  # ([128, 20])/ ([128,512]x20)
+
+                # DEBUG -----------------------------------------------------
+                if 0:
+                    torch.set_printoptions(edgeitems=100, linewidth=160)
+                    print '*'*100
+                    print f_sentences
+                    print '*' * 100
+                    print r_sentences
+                    print '*' * 100
+                # -----------------------------------------------------------
+
+                iter_batch_size = r_sentences.size()[0]  # instead of opt.batch_size
+
+                f_label = Variable(torch.FloatTensor(iter_batch_size).cuda())
+                r_label = Variable(torch.FloatTensor(iter_batch_size).cuda())
+                f_label.data.fill_(0)
+                r_label.data.fill_(1)
+
+                f_D_output = self.model_D(f_sentences_word_emb)
+                f_error = self.criterion_D(f_D_output, f_label.long())
+                f_error.backward()
+
+                r_D_output = self.model_D(r_sentences_word_emb)
+                r_error = self.criterion_D(r_D_output, r_label.long())
+                r_error.backward()
+
+                D_error = f_error + r_error
+                self.D_optimizer.step()
+
+                torch.cuda.synchronize()
+
+                if iter % self.opt.log_step == 0:
+                    print('[%d/%d][%d/%d] Loss_D: %.4f'
+                          % (epoch, self.opt.max_epochs, iter, len(self.trainloader), D_error.data[0]))
+                    train_loss_history[total_iteration] = {'loss': D_error.data[0]}
+                    self.train_loss_win = visualize_loss(self.train_loss_win, train_loss_history, 'train_loss', 'loss')
+
+                # make evaluation on validation set, and save model
+                if (total_iteration % self.opt.save_checkpoint_every == 0):
+
+                    checkpoint_path = os.path.join(self.opt.expr_dir, 'model_D_pretrained.pth')
+                    torch.save(self.model_D.state_dict(), checkpoint_path)
+
+                    print("model saved to {}".format(checkpoint_path))
+                    optimizer_path = os.path.join(self.opt.expr_dir, 'optimizer_D_pretrained.pth')
+                    torch.save(self.D_optimizer.state_dict(), optimizer_path)
+
+
+    ###############################################################################################
+    ############################# STEP 3. Training Adversarial model ##############################
     ###############################################################################################
 
     def train_adversarial(self):
@@ -690,16 +782,6 @@ class Trainer_GAN(object):
         if self.opt.load_best_score == True:
             best_val_score = self.infos.get('best_val_score', None)
 
-        def convertOutputVariable(outputs, maxlen, lengths):
-            outputs = torch.cat(outputs, 1).view(len(lengths), maxlen, -1)
-            outputs = pack_padded_sequence(outputs, lengths, batch_first=True)[0]
-            return outputs
-
-        def clip_gradient(optimizer, grad_clip):
-            for group in optimizer.param_groups:
-                for param in group['params']:
-                    param.grad.data.clamp_(-grad_clip, grad_clip)
-
         def set_lr(optimizer, lr):
             for group in optimizer.param_groups:
                 group['lr'] = lr
@@ -711,7 +793,7 @@ class Trainer_GAN(object):
                 decay_factor = self.opt.learning_rate_decay_rate ** fraction
                 self.opt.current_lr = self.opt.learning_rate * decay_factor
                 set_lr(self.G_optimizer, self.opt.current_lr)
-                set_lr(self.D_optimizer, self.opt.current_lr)
+                set_lr(self.D_optimizer, self.opt.current_lr*1e-1)
             else:
                 self.opt.current_lr = self.opt.learning_rate
 
@@ -731,7 +813,7 @@ class Trainer_GAN(object):
                 captions = Variable(captions).cuda()
 
                 lengths = [l-1 for l in lengths]
-                targets = pack_padded_sequence(captions[:,1:], lengths, batch_first=True)[0]
+
 
                 ################################################
                 # (1) Update D network
@@ -739,7 +821,8 @@ class Trainer_GAN(object):
                 ################################################
 
                 self.model_D.zero_grad()
-                f_sentences, f_sentences_word_emb = self.model_G.sample_multinomial(images) # ([128, 20])/ ([128,512]x20)
+                f_sentences, f_sentences_word_emb = self.model_G.sample_for_D(images, mode='greedy')  # ([128, 20])/ ([128,512]x20)
+                f_sentences, f_sentences_word_emb = self.model_G.pad_after_EOS(f_sentences)
 
                 r_sentences, r_sentences_word_emb = self.model_G.gt_sentences(captions)     # ([128, 20])/ ([128,512]x20)
 
@@ -747,15 +830,15 @@ class Trainer_GAN(object):
 
                 f_label = Variable(torch.FloatTensor(iter_batch_size).cuda())
                 r_label = Variable(torch.FloatTensor(iter_batch_size).cuda())
-                f_label.data.resize_(iter_batch_size).fill_(0)
-                r_label.data.resize_(iter_batch_size).fill_(1)
+                f_label.data.fill_(0)
+                r_label.data.fill_(1)
 
                 f_D_output = self.model_D(f_sentences_word_emb)
-                f_error = self.criterion_D(f_D_output, f_label)
+                f_error = self.criterion_D(f_D_output, f_label.long())
                 f_error.backward()
 
                 r_D_output = self.model_D(r_sentences_word_emb)
-                r_error = self.criterion_D(r_D_output, r_label)
+                r_error = self.criterion_D(r_D_output, r_label.long())
                 r_error.backward()
 
                 D_error = f_error + r_error
@@ -766,18 +849,45 @@ class Trainer_GAN(object):
                 ################################################
 
                 self.model_G.zero_grad()
-                f_outputs, f_outputs_actions, f_outputs_emb, _ = self.model_G(images, captions, train_MLE=False)
+
+                _, f_outputs_idx, f_outputs_actions, _, _ = self.model_G(images, captions, train_MLE=False)
+                '''this start!!!'''
+                _, f_outputs_actions_embeddings = self.model_G.pad_after_EOS(f_outputs_idx)
 
                 f_label = Variable(torch.FloatTensor(iter_batch_size).cuda())
-                f_label.data.resize_(iter_batch_size).fill_(1)
+                f_label.data.fill_(1)
 
-                f_D_output = self.model_D(f_outputs_emb)
-                G_error_rewards = self.criterion_D(f_D_output, f_label)
+                f_D_output = self.model_D(f_outputs_actions_embeddings)
 
-                reward = float(G_error_rewards.data.cpu().numpy()[0])
-                exp_reward = reward
-                for action in f_outputs_actions: # for each batch allocate reward.??!?!..... how????????!?!?!??!
-                    action.reinforce(exp_reward)
+                def loss_for_each_batch(outputs, labels, mode):
+                    if mode=='BCE':
+                        loss = [-(torch.log(outputs[i])*(labels[i]) + torch.log(1-outputs[i])*(1-labels[i]))
+                                for i in range(outputs.size(0))]
+                        return loss
+                    elif mode=='NLL':
+                        loss = [-(torch.log(outputs[i][1])*labels[i] + torch.log(outputs[i][0])*(1-labels[i]))
+                                for i in range(outputs.size(0))]
+                        return loss
+                    else:
+                        raise Exception('mode options must be BCE or NLL.')
+
+                #G_error_rewards = self.criterion_D(f_D_output, f_label.long())
+                G_error_rewards = torch.cat(loss_for_each_batch(f_D_output, f_label, mode='NLL'), 0).unsqueeze(1)
+                #G_error_rewards = torch.cat(loss_for_each_batch(f_D_output, f_label, mode='BCE'), 0).unsqueeze(1)
+
+                G_error_rewards = G_error_rewards.data.cpu().numpy()
+                G_error, G_rewards = np.average(G_error_rewards), torch.FloatTensor(G_error_rewards).cuda()
+
+                for action in f_outputs_actions:
+                    action.reinforce(-G_rewards)
+
+                # All same reward version...
+                # G_error_rewards = self.criterion_D(f_D_output, f_label)
+                # reward = float(G_error_rewards.data.cpu().numpy()[0])
+                # exp_reward = reward
+                #
+                # for action in f_outputs_actions: # for each batch allocate reward.??!?!..... how????????!?!?!??!
+                #     action.reinforce(exp_reward)
 
                 torch.autograd.backward(f_outputs_actions, [None for _ in f_outputs_actions])
                 self.G_optimizer.step()
@@ -787,8 +897,8 @@ class Trainer_GAN(object):
 
                 if iter % self.opt.log_step == 0:
                     print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f'
-                          % (epoch, self.opt.max_epochs, iter, len(self.trainloader), D_error.data[0], reward))
-                    train_loss_history[total_iteration] = {'loss': reward}
+                          % (epoch, self.opt.max_epochs, iter, len(self.trainloader), D_error.data[0], G_error))
+                    train_loss_history[total_iteration] = {'loss': G_error}
                     self.train_loss_win = visualize_loss(self.train_loss_win, train_loss_history, 'train_loss', 'loss')
 
                 # make evaluation on validation set, and save model
@@ -800,7 +910,7 @@ class Trainer_GAN(object):
 
                     # Write the training loss summary
                     # loss_history[total_iteration] = loss.data[0].cpu().numpy()[0]
-                    loss_history[total_iteration] = reward
+                    loss_history[total_iteration] = G_error
                     lr_history[total_iteration] = self.opt.current_lr
 
                     # Save model if is improving on validation result

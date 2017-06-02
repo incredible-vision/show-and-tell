@@ -436,23 +436,26 @@ class ShowAttendTellModel_G(nn.Module):
 
                 outputs.append(output)
 
-                action = output.multinomial()
-                outputs_action.append(action)
+                # action = output.multinomial()
+                # outputs_action.append(action)
+                #
+                # action_emb = self.embedding(action).squeeze(1)
+                # outputs_embedding.append(action_emb)
 
-                action_emb = self.embedding(action).squeeze(1)
-                outputs_embedding.append(action_emb)
+            return outputs
 
         # if train_MLE == False // for GAN-training
         else:
             word = Variable(torch.ones(images.size(0)).long()).cuda()
             xt = self.embedding(word)
 
-            for t in range(seqlen):
+            #for t in range(seqlen):
+            for t in range(self.max_length):
                 hidden, state = self.lstm(xt.unsqueeze(0), state)
                 output = self.classifier(hidden.squeeze(0))
-
                 outputs.append(output)
 
+                output = F.softmax(output)
                 action = output.multinomial()
                 outputs_action.append(action)
 
@@ -463,8 +466,12 @@ class ShowAttendTellModel_G(nn.Module):
 
             outputs_embedding = self.pad_outputs_to_maxlen(captions, outputs_embedding, max_length=20)
 
-        return outputs, outputs_action, outputs_embedding[:self.max_length], seqlen
-    #     # [20x(128,10000)], [20x(64,1)],   [20,(64,512)]                      20
+            # TEST
+            outputs_action = outputs_action[:self.max_length]
+            outputs_action_idx = torch.cat(outputs_action, 1)
+
+            return outputs, outputs_action_idx, outputs_action, outputs_embedding[:self.max_length], seqlen
+                    # [20x(64,1)],   [20,(64,512)]
 
     def pad_outputs_to_maxlen(self, captions, outputs_embedding, max_length=20):
         # input : captions(batch, lengths)
@@ -477,9 +484,28 @@ class ShowAttendTellModel_G(nn.Module):
 
         return outputs_embedding
 
+    def pad_after_EOS(self, f_sentences):
+
+        batch_size, length = f_sentences.size()
+
+        captions_fake = torch.zeros(batch_size, length).long().cuda()
+
+        for b, f_sentence in enumerate(f_sentences):
+            for i, f_word in enumerate(f_sentence):
+                if f_word.data.cpu().numpy()[0] == 2:
+                    break
+            captions_fake[b, :i] = f_sentence.data[:i]
+            captions_fake[b, i] = 2
+
+        captions_fake = Variable(captions_fake)
+
+        f_sentences_word_emb = torch.transpose(self.embedding(captions_fake), 0, 1)
+        f_sentences_word_emb = [t.squeeze(0) for t in f_sentences_word_emb]
+
+        return captions_fake, f_sentences_word_emb
 
     # for D_network_training.. : generate fake sample
-    def sample_multinomial(self, images, max_length=20):
+    def sample_for_D(self, images, max_length=20, mode='greedy'):
         xt = self.encoder(images)
         state = self.init_hidden(xt.size(0))
 
@@ -490,25 +516,37 @@ class ShowAttendTellModel_G(nn.Module):
         word = Variable(torch.ones(images.size(0)).long()).cuda()
         xt = self.embedding(word)
 
-        for t in range(max_length):
-            hidden, state = self.lstm(xt.unsqueeze(0), state)
-            output = self.classifier(hidden.squeeze(0))
+        if mode == 'greedy':
+            for t in range(max_length):
+                hidden, state = self.lstm(xt.unsqueeze(0), state)
+                output = self.classifier(hidden.squeeze(0))
 
-            # # Option 1 : Greedy search
-            #predicted_greedy = output.max(1)[1]
-            #outputs_greedy.append(predicted_greedy)
-            #xt = self.embedding(predicted_greedy).squeeze(1)
-            #saved_embedding.append(xt)
+                # # Option 1 : Greedy search
+                predicted_greedy = output.max(1)[1]
+                outputs_greedy.append(predicted_greedy)
+                xt = self.embedding(predicted_greedy).squeeze(1)
+                outputs_embedding.append(xt.detach())
 
-            # Option 2 : Multinomial search
-            predicted_multinomial = output.multinomial()
-            outputs_multinomial.append(predicted_multinomial)
-            xt = self.embedding(predicted_multinomial).squeeze(1)
-            outputs_embedding.append(xt.detach())
+            outputs_greedy = torch.cat(outputs_greedy, 1)
+            return outputs_greedy, outputs_embedding
 
-        outputs_multinomial = torch.cat(outputs_multinomial, 1)
+        elif mode == 'multinomial':
+            for t in range(max_length):
+                hidden, state = self.lstm(xt.unsqueeze(0), state)
+                output = self.classifier(hidden.squeeze(0))
 
-        return outputs_multinomial, outputs_embedding
+                # Option 2 : Multinomial search
+                output = F.softmax(output)
+                predicted_multinomial = output.multinomial()
+                outputs_multinomial.append(predicted_multinomial)
+                xt = self.embedding(predicted_multinomial).squeeze(1)
+                outputs_embedding.append(xt.detach())
+
+            outputs_multinomial = torch.cat(outputs_multinomial, 1)
+            return outputs_multinomial, outputs_embedding
+
+        else:
+            raise NameError, 'Please check the mode: greedy or multinomial.....'
 
     # for D_network_training.. : generate real sample
     def gt_sentences(self, captions):
@@ -516,10 +554,10 @@ class ShowAttendTellModel_G(nn.Module):
         iter_batch_size = captions.size(0)
         max_batch_length = captions.size(1)
 
-        if self.max_length <= max_batch_length: # if: max_batch_length >= 20
+        if self.max_length+1 <= max_batch_length: # if: max_batch_length >= 21 // for removing start token
             _gt_sentences = captions
-        else:                                   # else: padd 0 to length 20
-            temp = Variable(torch.LongTensor(iter_batch_size, self.max_length - max_batch_length).zero_()).cuda()
+        else:                                   # else: padd 0 to length 21
+            temp = Variable(torch.LongTensor(iter_batch_size, self.max_length+1 - max_batch_length).zero_()).cuda()
             _gt_sentences = torch.cat((captions, temp), 1)
 
         gt_sentences_embedding = torch.transpose(self.embedding(_gt_sentences), 0, 1)
@@ -528,9 +566,9 @@ class ShowAttendTellModel_G(nn.Module):
         gt_sentences = torch.transpose(_gt_sentences, 0, 1)
         gt_sentences = [t.unsqueeze(1) for t in gt_sentences]
 
-        gt_sentences = torch.cat(gt_sentences[:self.max_length], 1)
+        gt_sentences = torch.cat(gt_sentences[1:self.max_length+1], 1)
 
-        return gt_sentences, gt_sentences_embedding[:self.max_length]   # [[B x Emb] x L]
+        return gt_sentences, gt_sentences_embedding[1:self.max_length+1]   # [[B x Emb] x L]
 
     # for Evaluation
     def sample(self, images, maxlen=20):
@@ -561,7 +599,7 @@ class ShowAttendTellModel_D(nn.Module):
         self.opt = opt
         self.net_D = nn.Sequential(nn.Linear(self.opt.embed_size*2, self.opt.embed_size),
                                    nn.ReLU(),
-                                   nn.Linear(self.opt.embed_size, 1))
+                                   nn.Linear(self.opt.embed_size, 2))
 
         self.bi_lstm = nn.LSTM(input_size=self.opt.hidden_size, hidden_size=self.opt.hidden_size, bias=True,
                                batch_first=True, bidirectional=True)
@@ -570,7 +608,10 @@ class ShowAttendTellModel_D(nn.Module):
 
     def forward(self, input):
             embedding = self.self_attentive_sentence_embedding(input)
-            return F.sigmoid(self.net_D(embedding))
+            out = self.net_D(embedding)
+            #out = F.sigmoid(out)
+            out = F.softmax(out)
+            return out
 
     def self_attentive_sentence_embedding(self, input):
 

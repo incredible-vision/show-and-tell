@@ -46,8 +46,11 @@ def main(opt):
     #trainer = Trainer(opt, train_dataloader, valid_dataloader)
     #trainer = Trainer_PG(opt, train_dataloader, valid_dataloader)
 
-    #trainer = Trainer_GAN(opt, train_dataloader, valid_dataloader, mode='GAN_pretrain')
+    #trainer = Trainer_GAN(opt, train_dataloader, valid_dataloader, mode='GAN_G_pretrain')
     #trainer.train_mle()
+
+    #trainer = Trainer_GAN(opt, train_dataloader, valid_dataloader, mode='GAN_D_pretrain')
+    #trainer.train_discriminator()
 
     trainer = Trainer_GAN(opt, train_dataloader, valid_dataloader, mode='GAN_train')
     trainer.train_adversarial()
