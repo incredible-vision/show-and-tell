@@ -304,8 +304,8 @@ class Trainer(object):
 
                 sentence_fake = captions_fake.detach()
 
-
                 labels.data.fill_(self.fake_label)
+
                 if self.num_gpu > 0:
                     sentence_fake = sentence_fake.cuda()
                     # labels = labels.cuda()
@@ -313,6 +313,7 @@ class Trainer(object):
                 sentence_fake = self.generator.embedding(sentence_fake)
 
                 logit, _ = self.discriminator(sentence_fake, features.detach())
+                logit_softmax = F.softmax(logit)
                 loss_fake = self.criterion_D(logit, labels.long())
                 loss_fake.backward()
                 total_loss = loss_real + loss_fake
@@ -324,9 +325,9 @@ class Trainer(object):
 
 
                 if iter % self.opt.log_step == 0:
-                    print('Epoch [%d/%d], Step [%d/%d], Loss: %.4f'
+                    print('Epoch [%d/%d], Step [%d/%d], Total Loss: %.4f, Real Loss: %.4f, Fake Loss: %.4f, Fake Prob: %.4f'
                           % (epoch, self.opt.max_epochs, iter, self.total_train_iter,
-                             total_loss.data[0]))
+                             total_loss.data[0], loss_real.data[0], loss_fake.data[0], logit_softmax.data[0][1]))
                     train_loss_history[total_iteration] = {'loss': total_loss.data[0]}
                     self.train_loss_win = visualize_loss(self.train_loss_win, train_loss_history, 'train_discriminator_loss', 'loss')
 
