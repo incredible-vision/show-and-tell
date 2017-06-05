@@ -14,7 +14,7 @@ from models.ShowAttendTellModel import ShowAttendTellModel
 
 from models.models1 import EncoderCNN, DecoderRNN, DecoderPolicyGradient
 from models.models2 import ShowAttendTellModel_XE
-from models.models2 import ShowAttendTellModel_G, ShowAttendTellModel_D
+from models.models2 import ShowAttendTellModel_G, ShowAttendTellModel_D, ShowAttendTellModel_D_imgATT
 
 
 def model_setup(opt, model_name):
@@ -75,12 +75,14 @@ def model_setup_2(opt, model_name):
     elif model_name == 'ShowAttendTellModel_D_pretrain':
         opt.load_pretrain = True
         opt.start_from = False
-        model = [ShowAttendTellModel_G(opt), ShowAttendTellModel_D(opt)]
+        #model = [ShowAttendTellModel_G(opt), ShowAttendTellModel_D(opt)]
+        model = [ShowAttendTellModel_G(opt), ShowAttendTellModel_D_imgATT(opt)]
 
     elif model_name == 'ShowAttendTellModel_GAN':
         opt.load_pretrain = True
         opt.start_from = False
-        model = [ShowAttendTellModel_G(opt), ShowAttendTellModel_D(opt)]
+        #model = [ShowAttendTellModel_G(opt), ShowAttendTellModel_D(opt)]
+        model = [ShowAttendTellModel_G(opt), ShowAttendTellModel_D_imgATT(opt)]
 
     else:
         raise Exception("Caption model not supported: {}".format(opt.model_name))

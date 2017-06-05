@@ -411,7 +411,7 @@ class ShowAttendTellModel_G(nn.Module):
 
     # for Pre-training : train_MLE=True
     # for GAN-training : train_MLE=False
-    def forward(self, images, captions, maxlen=None, train_MLE=False):
+    def forward(self, images, captions, maxlen=None, mode=None):
         # images : [batch x 3 x 224 x 224]
 
         xt = self.encoder(images) # xt : [batch x embed_size], encode images with encoder,
@@ -428,7 +428,7 @@ class ShowAttendTellModel_G(nn.Module):
         outputs_embedding = []
 
         # if train_MLE == True // for pre-training
-        if train_MLE==True:
+        if mode=='trainMLE':
             for t in range(seqlen):
                 xt = captions[:, t, :]
                 hidden, state = self.lstm(xt.unsqueeze(0), state)
@@ -444,12 +444,10 @@ class ShowAttendTellModel_G(nn.Module):
 
             return outputs
 
-        # if train_MLE == False // for GAN-training
-        else:
+        elif mode=='trainGAN':
             word = Variable(torch.ones(images.size(0)).long()).cuda()
             xt = self.embedding(word)
 
-            #for t in range(seqlen):
             for t in range(self.max_length):
                 hidden, state = self.lstm(xt.unsqueeze(0), state)
                 output = self.classifier(hidden.squeeze(0))
@@ -464,14 +462,37 @@ class ShowAttendTellModel_G(nn.Module):
 
                 xt = action_emb.detach() # !!@!
 
-            outputs_embedding = self.pad_outputs_to_maxlen(captions, outputs_embedding, max_length=20)
+            #outputs_embedding = self.pad_outputs_to_maxlen(captions, outputs_embedding, max_length=20)
 
             # TEST
             outputs_action = outputs_action[:self.max_length]
             outputs_action_idx = torch.cat(outputs_action, 1)
 
-            return outputs, outputs_action_idx, outputs_action, outputs_embedding[:self.max_length], seqlen
-                    # [20x(64,1)],   [20,(64,512)]
+            return outputs_action_idx, outputs_action, outputs_embedding[:self.max_length]
+
+        elif mode=='eval':
+            word = Variable(torch.ones(images.size(0)).long()).cuda()
+            xt = self.embedding(word)
+
+            for t in range(seqlen):
+                hidden, state = self.lstm(xt.unsqueeze(0), state)
+                output = self.classifier(hidden.squeeze(0))
+                outputs.append(output)
+
+                output = F.softmax(output)
+                action = output.multinomial()
+                outputs_action.append(action)
+
+                action_emb = self.embedding(action).squeeze(1)
+                outputs_embedding.append(action_emb)
+
+                xt = action_emb.detach() # !!@!
+
+            return outputs, seqlen
+
+        else:
+            raise NameError, 'check model option plz.. (1)trainMLE, (2)trainGAN, (3)eval.. choose one baby'
+
 
     def pad_outputs_to_maxlen(self, captions, outputs_embedding, max_length=20):
         # input : captions(batch, lengths)
@@ -637,3 +658,61 @@ class ShowAttendTellModel_D(nn.Module):
         embedding = torch.sum(embedding, dim=1)   # embedding = 128, 1, 1024
 
         return embedding.squeeze(1)               # embedding = 128, 1024
+
+
+
+
+class ShowAttendTellModel_D_imgATT(nn.Module):
+
+    def __init__(self, opt):
+        super(ShowAttendTellModel_D_imgATT, self).__init__()
+        self.opt = opt
+        self.net_D = nn.Sequential(nn.Linear(1024, 512),
+                                   nn.ReLU(),
+                                   nn.Linear(512, 2))
+
+        self.bi_lstm = nn.LSTM(input_size=self.opt.hidden_size, hidden_size=self.opt.hidden_size, bias=True,
+                               batch_first=True, bidirectional=True)
+
+        self.W_im = nn.Sequential(nn.Linear(512, 1024),
+                                  nn.ReLU())
+
+        self.conv1 = nn.Sequential(nn.Conv1d(in_channels=20, out_channels=20, kernel_size=2048))
+
+    def forward(self, input, im_input, iter):
+            embedding = self.self_attentive_sentence_embedding(input, im_input, iter)
+            out = self.net_D(embedding)
+            return out
+
+    def self_attentive_sentence_embedding(self, input, im_input, iter):
+
+        input = [i.unsqueeze(0) for i in input] # [20 x (1, 128, 512)]
+        input = torch.cat(input, 0)             # [20, 128, 512]
+
+        output, hn = self.bi_lstm(input) # [20, 128, 512x2]
+
+        H_st = torch.transpose(output, 0, 1) # [128, 20, 512x2]
+
+        H_im = self.W_im(im_input)
+        H_im = H_im.repeat(20, 1, 1).transpose(0,1) #  [128, 20, 1024]
+
+        H_ = torch.cat((H_st, H_im), 2)
+
+        temp = self.conv1(H_)
+        temp = temp.squeeze(2)
+        attention = F.softmax(temp)
+
+        attention = attention.unsqueeze(2)
+
+        attention = attention.repeat(1,1, 1024) # attention = 128, 20, 2048
+
+        # if iter % 20 == 0:
+        #     torch.set_printoptions(edgeitems=100, linewidth=160)
+        #     print '*' * 100
+        #     print attention
+        #     print '*' * 100
+
+        embedding = attention * H_st            # embedding = 128, 20, 2048
+        embedding = torch.sum(embedding, dim=1)   # embedding = 128, 1, 2048
+
+        return embedding.squeeze(1)               # embedding = 128, 2048

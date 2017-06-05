@@ -13,9 +13,9 @@ def parse_opt():
     parser.add_argument('--vocab_path', type=str, default='data/vocab.pkl', help='vocabulary wrapper')
 
     parser.add_argument('--num_gpu', type=int, default=1, help='number of gpus available, if set to 0, use cpu instead')
-    parser.add_argument('--random_seed', type=int, default=1234, help='random seed number, to reproduce the result, fix the number')
+    parser.add_argument('--random_seed', type=int, default=1223, help='random seed number, to reproduce the result, fix the number')
     parser.add_argument('--crop_size', type=int, default=224, help='image crop size, spatial dimension of input to the encoder')
-    parser.add_argument('--batch_size', type=int, default=128, help='batch size for training')
+    parser.add_argument('--batch_size', type=int, default=32, help='batch size for training')
 
     parser.add_argument('--expr_dir', type=str, default='experiment', help='experiment directory')
     parser.add_argument('--exp_id', type=str, default='withGAN', help='experiment id')

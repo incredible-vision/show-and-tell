@@ -1,6 +1,6 @@
-2017-06-02 17:12:00 - INFO - 
+2017-06-05 13:50:36 - INFO - 
 run arguments: {
-    "batch_size": 128, 
+    "batch_size": 32, 
     "crop_size": 224, 
     "data_json": "data/data.json", 
     "embed_size": 512, 
@@ -22,7 +22,7 @@ run arguments: {
     "max_length": 20, 
     "num_gpu": 1, 
     "num_layers": 1, 
-    "random_seed": 1234, 
+    "random_seed": 1223, 
     "root_dir": "/home/gt/PycharmProjects/show-and-tell", 
     "save_checkpoint_every": 500, 
     "scheduled_sampling_increase_every": 5, 

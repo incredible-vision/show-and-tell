@@ -534,7 +534,7 @@ class Trainer_GAN(object):
         G_parameters = filter(lambda p: p.requires_grad, self.model_G.parameters())
         D_parameters = filter(lambda p: p.requires_grad, self.model_D.parameters())
         self.G_optimizer = optim.Adam(G_parameters, lr=opt.learning_rate)
-        self.D_optimizer = optim.Adam(D_parameters, lr=opt.learning_rate*1e-1)
+        self.D_optimizer = optim.Adam(D_parameters, lr=opt.learning_rate*1e-2)
 
         print('done')
 
@@ -608,7 +608,7 @@ class Trainer_GAN(object):
                 # or get maximum sequence length in ground truth captions
                 seqlen = self.seqlen if self.seqlen is not None else lengths[0]
 
-                outputs = self.model_G(images, captions[:,:-1], seqlen, train_MLE=True)
+                outputs = self.model_G(images, captions[:,:-1], seqlen, mode='trainMLE')
                 outputs = convertOutputVariable(outputs, seqlen, lengths)
 
                 loss = self.criterion_G(outputs, targets)
@@ -687,6 +687,9 @@ class Trainer_GAN(object):
         loaded_epoch = self.infos.get('epoch', 0)
         train_loss_history = self.infos.get('train_loss_history', {})
 
+        for group in self.D_optimizer.param_groups:
+            group['lr'] = 0.0001
+
         for epoch in range(loaded_epoch + 1, 1 + self.opt.max_epochs):
 
             self.model_D.train()
@@ -717,15 +720,15 @@ class Trainer_GAN(object):
 
                 r_sentences, r_sentences_word_emb = self.model_G.gt_sentences(captions)  # ([128, 20])/ ([128,512]x20)
 
-                # DEBUG -----------------------------------------------------
-                if 0:
-                    torch.set_printoptions(edgeitems=100, linewidth=160)
-                    print '*'*100
-                    print f_sentences
-                    print '*' * 100
-                    print r_sentences
-                    print '*' * 100
-                # -----------------------------------------------------------
+                # # DEBUG -----------------------------------------------------
+                # if iter % 40 == 0:
+                #     torch.set_printoptions(edgeitems=100, linewidth=160)
+                #     print '*'*100
+                #     print f_sentences
+                #     print '*' * 100
+                #     print r_sentences
+                #     print '*' * 100
+                # # -----------------------------------------------------------
 
                 iter_batch_size = r_sentences.size()[0]  # instead of opt.batch_size
 
@@ -734,11 +737,13 @@ class Trainer_GAN(object):
                 f_label.data.fill_(0)
                 r_label.data.fill_(1)
 
-                f_D_output = self.model_D(f_sentences_word_emb)
+                #f_D_output = self.model_D(f_sentences_word_emb)
+                f_D_output = self.model_D(f_sentences_word_emb, self.model_G.encoder(images).detach(), iter)
                 f_error = self.criterion_D(f_D_output, f_label.long())
                 f_error.backward()
 
-                r_D_output = self.model_D(r_sentences_word_emb)
+                #r_D_output = self.model_D(r_sentences_word_emb)
+                r_D_output = self.model_D(r_sentences_word_emb, self.model_G.encoder(images).detach(), iter)
                 r_error = self.criterion_D(r_D_output, r_label.long())
                 r_error.backward()
 
@@ -751,7 +756,7 @@ class Trainer_GAN(object):
                     print('[%d/%d][%d/%d] Loss_D: %.4f'
                           % (epoch, self.opt.max_epochs, iter, len(self.trainloader), D_error.data[0]))
                     train_loss_history[total_iteration] = {'loss': D_error.data[0]}
-                    self.train_loss_win = visualize_loss(self.train_loss_win, train_loss_history, 'train_loss', 'loss')
+                    self.train_loss_win = visualize_loss(self.train_loss_win, train_loss_history, 'Discriminator Pretrain Loss', 'loss')
 
                 # make evaluation on validation set, and save model
                 if (total_iteration % self.opt.save_checkpoint_every == 0):
@@ -793,7 +798,7 @@ class Trainer_GAN(object):
                 decay_factor = self.opt.learning_rate_decay_rate ** fraction
                 self.opt.current_lr = self.opt.learning_rate * decay_factor
                 set_lr(self.G_optimizer, self.opt.current_lr)
-                set_lr(self.D_optimizer, self.opt.current_lr*1e-1)
+                set_lr(self.D_optimizer, self.opt.current_lr*1e-2)
             else:
                 self.opt.current_lr = self.opt.learning_rate
 
@@ -814,7 +819,6 @@ class Trainer_GAN(object):
 
                 lengths = [l-1 for l in lengths]
 
-
                 ################################################
                 # (1) Update D network
                 # : (1-1) Fake sentence (1-2) Real sentence
@@ -833,16 +837,28 @@ class Trainer_GAN(object):
                 f_label.data.fill_(0)
                 r_label.data.fill_(1)
 
-                f_D_output = self.model_D(f_sentences_word_emb)
+                #f_D_output = self.model_D(f_sentences_word_emb)
+                f_D_output = self.model_D(f_sentences_word_emb, self.model_G.encoder(images).detach(), iter)
                 f_error = self.criterion_D(f_D_output, f_label.long())
                 f_error.backward()
 
-                r_D_output = self.model_D(r_sentences_word_emb)
+                #r_D_output = self.model_D(r_sentences_word_emb)
+                r_D_output = self.model_D(r_sentences_word_emb, self.model_G.encoder(images).detach(), iter)
                 r_error = self.criterion_D(r_D_output, r_label.long())
                 r_error.backward()
 
                 D_error = f_error + r_error
-                self.D_optimizer.step()
+                #self.D_optimizer.step()
+
+                # DEBUG -----------------------------------------------------
+                if 1:
+                    torch.set_printoptions(edgeitems=40, linewidth=140)
+                    print '*'*100
+                    print f_sentences
+                    print '*' * 100
+                    print r_sentences
+                    print '*' * 100
+                # -----------------------------------------------------------
 
                 ################################################
                 # (2) Update G network:
@@ -850,14 +866,15 @@ class Trainer_GAN(object):
 
                 self.model_G.zero_grad()
 
-                _, f_outputs_idx, f_outputs_actions, _, _ = self.model_G(images, captions, train_MLE=False)
+                f_outputs_idx, f_outputs_actions, _ = self.model_G(images, captions, mode='trainGAN')
                 '''this start!!!'''
                 _, f_outputs_actions_embeddings = self.model_G.pad_after_EOS(f_outputs_idx)
 
                 f_label = Variable(torch.FloatTensor(iter_batch_size).cuda())
                 f_label.data.fill_(1)
 
-                f_D_output = self.model_D(f_outputs_actions_embeddings)
+                #f_D_output = self.model_D(f_outputs_actions_embeddings)
+                f_D_output = self.model_D(f_outputs_actions_embeddings, self.model_G.encoder(images).detach(), iter)
 
                 def loss_for_each_batch(outputs, labels, mode):
                     if mode=='BCE':
@@ -868,18 +885,23 @@ class Trainer_GAN(object):
                         loss = [-(torch.log(outputs[i][1])*labels[i] + torch.log(outputs[i][0])*(1-labels[i]))
                                 for i in range(outputs.size(0))]
                         return loss
+
+                    elif mode=='Acc':
+                        loss = [outputs[i][1] for i in range(outputs.size(0))]
+                        #loss = [F.softmax(outputs[i][1]) for i in range(outputs.size(0))]
+                        return loss
                     else:
                         raise Exception('mode options must be BCE or NLL.')
 
-                #G_error_rewards = self.criterion_D(f_D_output, f_label.long())
-                G_error_rewards = torch.cat(loss_for_each_batch(f_D_output, f_label, mode='NLL'), 0).unsqueeze(1)
                 #G_error_rewards = torch.cat(loss_for_each_batch(f_D_output, f_label, mode='BCE'), 0).unsqueeze(1)
+                #G_error_rewards = torch.cat(loss_for_each_batch(f_D_output, f_label, mode='NLL'), 0).unsqueeze(1)
+                G_error_rewards = torch.cat(loss_for_each_batch(f_D_output, f_label, mode='Acc'), 0).unsqueeze(1)
 
                 G_error_rewards = G_error_rewards.data.cpu().numpy()
                 G_error, G_rewards = np.average(G_error_rewards), torch.FloatTensor(G_error_rewards).cuda()
 
                 for action in f_outputs_actions:
-                    action.reinforce(-G_rewards)
+                    action.reinforce(G_rewards)
 
                 # All same reward version...
                 # G_error_rewards = self.criterion_D(f_D_output, f_label)
@@ -899,7 +921,7 @@ class Trainer_GAN(object):
                     print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f'
                           % (epoch, self.opt.max_epochs, iter, len(self.trainloader), D_error.data[0], G_error))
                     train_loss_history[total_iteration] = {'loss': G_error}
-                    self.train_loss_win = visualize_loss(self.train_loss_win, train_loss_history, 'train_loss', 'loss')
+                    self.train_loss_win = visualize_loss(self.train_loss_win, train_loss_history, 'Adversarial train: G_rewards', 'loss')
 
                 # make evaluation on validation set, and save model
                 if (total_iteration % self.opt.save_checkpoint_every == 0):
