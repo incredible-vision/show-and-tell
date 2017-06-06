@@ -886,16 +886,18 @@ class Trainer_GAN(object):
 
                 def loss_for_each_batch(outputs, labels, mode):
                     if mode=='BCE':
+                        # output must have passed through F.SIGMOID
                         loss = [-(torch.log(outputs[i])*(labels[i]) + torch.log(1-outputs[i])*(1-labels[i]))
                                 for i in range(outputs.size(0))]
                         return loss
                     elif mode=='NLL':
+                        # np.average(loss) == criterion_G(outputs) // check complete
+                        outputs = F.softmax(outputs)
                         loss = [-(torch.log(outputs[i][1])*labels[i] + torch.log(outputs[i][0])*(1-labels[i]))
                                 for i in range(outputs.size(0))]
                         return loss
 
                     elif mode=='Acc':
-                        #loss = [outputs[i][1] for i in range(outputs.size(0))]
                         loss = [outputs[i][1] for i in range(outputs.size(0))]
                         return loss
                     else:
@@ -908,22 +910,28 @@ class Trainer_GAN(object):
                 G_error_rewards = G_error_rewards.data.cpu().numpy()
                 G_error, G_rewards = np.average(G_error_rewards), torch.FloatTensor(G_error_rewards).cuda()
 
-                for action in f_outputs_actions:
-                    action.reinforce(G_rewards)
-                #
-                # for action, r in zip(f_outputs_actions, rewards):
-                #     # action.reinforce(float(r.data.cpu().numpy()[0]))
-                #     tmp = (
-                #         (action.detach().data > 1).type('torch.cuda.FloatTensor') * r.data.expand(action.data.size()))
-                #     action.reinforce(tmp)                                                                                                                                                                                                                                                                                                                                                 
+                G_rewards = np.repeat(G_rewards, 20)
 
-                # All same reward version...
-                # G_error_rewards = self.criterion_D(f_D_output, f_label)
-                # reward = float(G_error_rewards.data.cpu().numpy()[0])
-                # exp_reward = reward
+                # (1) All same reward version...
+                # for action in f_outputs_actions:
+                #     action.reinforce(G_rewards)
+
+                # (2) After End-token -> reward = 0 version..
+                for action, r in zip(f_outputs_actions, G_rewards):
+                    tmp = ((action.detach().data > 1).type('torch.cuda.FloatTensor') * r.expand(action.data.size()))
+                    action.reinforce(tmp)
+
+                # def get_RO_rewards(self, f_outputs_actions, K=3):
+                #     self.model_G
+                #     self.model_D
                 #
-                # for action in f_outputs_actions: # for each batch allocate reward.??!?!..... how????????!?!?!??!
-                #     action.reinforce(exp_reward)
+                #     for
+                #
+                # # (3) Rollout -> Reward version..
+                # for action, r in zip(f_outputs_actions, RO_rewards):
+                #     tmp = ((action.detach().data>1).type('torch.cuda.FloatTensor') * r)
+                #     action.reinforce(tmp)
+
 
                 torch.autograd.backward(f_outputs_actions, [None for _ in f_outputs_actions])
                 self.G_optimizer.step()
