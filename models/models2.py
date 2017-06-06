@@ -631,7 +631,6 @@ class ShowAttendTellModel_D(nn.Module):
             embedding = self.self_attentive_sentence_embedding(input)
             out = self.net_D(embedding)
             #out = F.sigmoid(out)
-            out = F.softmax(out)
             return out
 
     def self_attentive_sentence_embedding(self, input):
@@ -661,7 +660,6 @@ class ShowAttendTellModel_D(nn.Module):
 
 
 
-
 class ShowAttendTellModel_D_imgATT(nn.Module):
 
     def __init__(self, opt):
@@ -674,13 +672,20 @@ class ShowAttendTellModel_D_imgATT(nn.Module):
         self.bi_lstm = nn.LSTM(input_size=self.opt.hidden_size, hidden_size=self.opt.hidden_size, bias=True,
                                batch_first=True, bidirectional=True)
 
-        self.W_im = nn.Sequential(nn.Linear(512, 1024),
-                                  nn.ReLU())
+        self.W_im_emb = nn.Sequential(nn.Linear(512, 512),
+                                      nn.ReLU())
 
-        self.conv1 = nn.Sequential(nn.Conv1d(in_channels=20, out_channels=20, kernel_size=2048))
+        self.W_conv1 = nn.Sequential(nn.Conv1d(in_channels=20, out_channels=20, kernel_size=1024))
+
+        self.W_conv2 = nn.Sequential(nn.Conv2d(in_channels=1, out_channels=128, kernel_size=(1,1024)),
+                                     nn.ReLU(),
+                                     nn.Conv2d(in_channels=128, out_channels=1, kernel_size=(1,1)))
+
+        self.W_sent_emb1 = nn.Sequential(nn.Linear(1024, 512))
 
     def forward(self, input, im_input, iter):
-            embedding = self.self_attentive_sentence_embedding(input, im_input, iter)
+            #embedding = self.self_attentive_sentence_embedding(input, im_input, iter)
+            embedding = self.self_attentive_sentence_embedding_2(input, im_input, iter)
             out = self.net_D(embedding)
             return out
 
@@ -693,10 +698,10 @@ class ShowAttendTellModel_D_imgATT(nn.Module):
 
         H_st = torch.transpose(output, 0, 1) # [128, 20, 512x2]
 
-        H_im = self.W_im(im_input)
+        H_im = self.W_im_emb(im_input)
         H_im = H_im.repeat(20, 1, 1).transpose(0,1) #  [128, 20, 1024]
 
-        H_ = torch.cat((H_st, H_im), 2)
+        H_ = torch.cat((H_st, H_im), 2) #[ 128, 20, 2048]
 
         temp = self.conv1(H_)
         temp = temp.squeeze(2)
@@ -716,3 +721,42 @@ class ShowAttendTellModel_D_imgATT(nn.Module):
         embedding = torch.sum(embedding, dim=1)   # embedding = 128, 1, 2048
 
         return embedding.squeeze(1)               # embedding = 128, 2048
+
+
+    def self_attentive_sentence_embedding_2(self, input, im_input, iter):
+        input = [i.unsqueeze(0) for i in input]  # [20 x (1, 128, 512)]
+        input = torch.cat(input, 0)              # [20, 128, 512]
+
+        iter_batch_size = input.size()[1]
+
+        output, hn = self.bi_lstm(input)      # [20, 128, 1024]
+
+        H_st_ = torch.transpose(output, 0, 1)  # [128, 20, 1024]
+
+        H_st = torch.cat(H_st_, 0)             # [128x20,  1024]
+        H_st = self.W_sent_emb1(H_st)         # [128x20,  512 ]
+        H_st = H_st.view(iter_batch_size, 20, 512)
+
+        H_im = self.W_im_emb(im_input)                # [128, 512]
+        H_im = H_im.repeat(20, 1, 1).transpose(0, 1)  # [128, 20, 512]
+
+        H_ = torch.cat((H_st, H_im), 2)  # [128, 20, 1024]
+        H_ = H_.unsqueeze(1)             # [128, 1, 20, 1024]
+        H_ = self.W_conv2(H_)            # [128, 1, 20, 1]
+        H_ = H_.squeeze(3).squeeze(1)    # [128,20]
+
+        attention_ = F.softmax(H_)
+        attention = attention_.unsqueeze(2)
+        attention = attention.repeat(1, 1, 1024)   # attention = [128, 20, 1024]
+
+        debug = 0
+        if debug == 1:
+            torch.set_printoptions(edgeitems=100, linewidth=180)
+            print '*'*100
+            print attention_
+            print '*' * 100
+
+        embedding = attention * H_st_              # embedding = [128, 20, 1024]
+        embedding = torch.sum(embedding, dim=1)    # embedding = [128, 1, 1024]
+
+        return embedding.squeeze(1)                # embedding = [128, 1024]

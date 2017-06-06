@@ -1,6 +1,6 @@
-2017-06-05 13:50:36 - INFO - 
+2017-06-06 13:43:48 - INFO - 
 run arguments: {
-    "batch_size": 32, 
+    "batch_size": 128, 
     "crop_size": 224, 
     "data_json": "data/data.json", 
     "embed_size": 512, 
@@ -9,7 +9,7 @@ run arguments: {
     "grad_clip": 0.5, 
     "hidden_size": 512, 
     "language_eval": 1, 
-    "learning_rate": 0.0001, 
+    "learning_rate": 1e-06, 
     "learning_rate_decay_every": 3, 
     "learning_rate_decay_rate": 0.8, 
     "learning_rate_decay_start": 1, 
@@ -22,9 +22,9 @@ run arguments: {
     "max_length": 20, 
     "num_gpu": 1, 
     "num_layers": 1, 
-    "random_seed": 1223, 
+    "random_seed": 1227, 
     "root_dir": "/home/gt/PycharmProjects/show-and-tell", 
-    "save_checkpoint_every": 500, 
+    "save_checkpoint_every": 400, 
     "scheduled_sampling_increase_every": 5, 
     "scheduled_sampling_increase_prob": 0.05, 
     "scheduled_sampling_max_prob": 0.25, 

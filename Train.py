@@ -534,7 +534,7 @@ class Trainer_GAN(object):
         G_parameters = filter(lambda p: p.requires_grad, self.model_G.parameters())
         D_parameters = filter(lambda p: p.requires_grad, self.model_D.parameters())
         self.G_optimizer = optim.Adam(G_parameters, lr=opt.learning_rate)
-        self.D_optimizer = optim.Adam(D_parameters, lr=opt.learning_rate*1e-2)
+        self.D_optimizer = optim.Adam(D_parameters, lr=opt.learning_rate*1e-1)
 
         print('done')
 
@@ -798,12 +798,14 @@ class Trainer_GAN(object):
                 decay_factor = self.opt.learning_rate_decay_rate ** fraction
                 self.opt.current_lr = self.opt.learning_rate * decay_factor
                 set_lr(self.G_optimizer, self.opt.current_lr)
-                set_lr(self.D_optimizer, self.opt.current_lr*1e-2)
+                set_lr(self.D_optimizer, self.opt.current_lr*1e-1)
             else:
                 self.opt.current_lr = self.opt.learning_rate
 
             self.model_D.train()
             self.model_G.train()
+
+            D_update = 0
 
             for iter, (images, captions, lengths, cocoids) in enumerate(self.trainloader):
 
@@ -848,14 +850,20 @@ class Trainer_GAN(object):
                 r_error.backward()
 
                 D_error = f_error + r_error
-                #self.D_optimizer.step()
+                self.D_optimizer.step()
+
+                # if D_update == 2:
+                #     self.D_optimizer.step()
+                #     D_update = 0
+                # else:
+                #     D_update += 1
 
                 # DEBUG -----------------------------------------------------
-                if 1:
+                if 0:
                     torch.set_printoptions(edgeitems=40, linewidth=140)
-                    print '*'*100
+                    print 'fake*'*100
                     print f_sentences
-                    print '*' * 100
+                    print 'real*' * 100
                     print r_sentences
                     print '*' * 100
                 # -----------------------------------------------------------
@@ -887,8 +895,8 @@ class Trainer_GAN(object):
                         return loss
 
                     elif mode=='Acc':
+                        #loss = [outputs[i][1] for i in range(outputs.size(0))]
                         loss = [outputs[i][1] for i in range(outputs.size(0))]
-                        #loss = [F.softmax(outputs[i][1]) for i in range(outputs.size(0))]
                         return loss
                     else:
                         raise Exception('mode options must be BCE or NLL.')
@@ -902,6 +910,12 @@ class Trainer_GAN(object):
 
                 for action in f_outputs_actions:
                     action.reinforce(G_rewards)
+                #
+                # for action, r in zip(f_outputs_actions, rewards):
+                #     # action.reinforce(float(r.data.cpu().numpy()[0]))
+                #     tmp = (
+                #         (action.detach().data > 1).type('torch.cuda.FloatTensor') * r.data.expand(action.data.size()))
+                #     action.reinforce(tmp)                                                                                                                                                                                                                                                                                                                                                 
 
                 # All same reward version...
                 # G_error_rewards = self.criterion_D(f_D_output, f_label)
