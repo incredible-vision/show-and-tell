@@ -505,6 +505,7 @@ class ShowAttendTellModel_G(nn.Module):
 
         return outputs_embedding
 
+
     def pad_after_EOS(self, f_sentences):
 
         batch_size, length = f_sentences.size()
@@ -591,6 +592,41 @@ class ShowAttendTellModel_G(nn.Module):
 
         return gt_sentences, gt_sentences_embedding[1:self.max_length+1]   # [[B x Emb] x L]
 
+    # for G_network_training.. Rollout + Reward
+    def sample_for_G_rollout(self, images, input_sentences, max_len=20):
+
+        xt = self.encoder(images)
+        state = self.init_hidden(xt.size(0))
+
+        hidden, state = self.lstm(xt.unsqueeze(0), state)
+
+        word = Variable(torch.ones(images.size(0)).long()).cuda()
+        xt = self.embedding(word)
+
+        rollout_greedy = []
+        input_sentence_length = len(input_sentences)
+
+        # forward input words
+        for t in range(input_sentence_length):
+            hidden, state = self.lstm(xt.unsqueeze(0), state)
+
+            predicted_greedy = input_sentences[t]
+
+            rollout_greedy.append(predicted_greedy)
+            xt = self.embedding(predicted_greedy).squeeze(1)
+
+        # rollout residual words
+        for t in range(input_sentence_length, max_len):
+            hidden, state = self.lstm(xt.unsqueeze(0), state)
+            output = self.classifier(hidden.squeeze(0))
+
+            # Option 1 : Greedy search
+            predicted_greedy = output.max(1)[1]
+            rollout_greedy.append(predicted_greedy)
+            xt = self.embedding(predicted_greedy).squeeze(1)
+
+        return torch.cat(rollout_greedy, 1)
+
     # for Evaluation
     def sample(self, images, maxlen=20):
 
@@ -657,7 +693,6 @@ class ShowAttendTellModel_D(nn.Module):
         embedding = torch.sum(embedding, dim=1)   # embedding = 128, 1, 1024
 
         return embedding.squeeze(1)               # embedding = 128, 1024
-
 
 
 class ShowAttendTellModel_D_imgATT(nn.Module):

@@ -96,7 +96,8 @@ def model_setup_2(opt, model_name):
     if opt.load_pretrain == True:
         pretrain_path = os.path.join(opt.root_dir, 'experiment', opt.user_id, opt.exp_id)
         assert os.path.isdir(pretrain_path), " %s must be a path" % pretrain_path
-        assert os.path.isfile(os.path.join(pretrain_path, "model_mle_G_infos-best.pkl")), "infos-best.pkl file does not exist in path %s" % pretrain_path
+        assert os.path.isfile(os.path.join(pretrain_path, "model_mle_G_infos-best.pkl")), \
+            "infos-best.pkl file does not exist in path %s" % pretrain_path
 
         if model_name == 'ShowAttendTellModel_D_pretrain': # only load Generator
             model[0].load_state_dict(torch.load(os.path.join(pretrain_path, "model_mle_G-best.pth")))

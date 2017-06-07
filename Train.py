@@ -530,6 +530,10 @@ class Trainer_GAN(object):
         #self.criterion_D = nn.BCELoss(size_average=True)
         self.criterion_D = nn.CrossEntropyLoss(size_average=True)
 
+        """ select RewardMode = <RollOut> or <NoRollOut>"""
+        self.RewardMode = 'RollOut'
+        #self.RewardMode = 'NoRollOut'
+
         """ only update trainable parameters """
         G_parameters = filter(lambda p: p.requires_grad, self.model_G.parameters())
         D_parameters = filter(lambda p: p.requires_grad, self.model_D.parameters())
@@ -827,6 +831,7 @@ class Trainer_GAN(object):
                 ################################################
 
                 self.model_D.zero_grad()
+
                 f_sentences, f_sentences_word_emb = self.model_G.sample_for_D(images, mode='greedy')  # ([128, 20])/ ([128,512]x20)
                 f_sentences, f_sentences_word_emb = self.model_G.pad_after_EOS(f_sentences)
 
@@ -875,74 +880,101 @@ class Trainer_GAN(object):
                 self.model_G.zero_grad()
 
                 f_outputs_idx, f_outputs_actions, _ = self.model_G(images, captions, mode='trainGAN')
-                '''this start!!!'''
-                _, f_outputs_actions_embeddings = self.model_G.pad_after_EOS(f_outputs_idx)
+                f_outputs_idx, f_outputs_actions_embeddings = self.model_G.pad_after_EOS(f_outputs_idx)
 
                 f_label = Variable(torch.FloatTensor(iter_batch_size).cuda())
                 f_label.data.fill_(1)
 
-                #f_D_output = self.model_D(f_outputs_actions_embeddings)
-                f_D_output = self.model_D(f_outputs_actions_embeddings, self.model_G.encoder(images).detach(), iter)
+                if self.RewardMode == 'NoRollOut':
+                    #f_D_output = self.model_D(f_outputs_actions_embeddings)
+                    f_D_output = self.model_D(f_outputs_actions_embeddings, self.model_G.encoder(images).detach(), iter)
+                    f_outputs_idx = [f_output_idx.unsqueeze(1) for f_output_idx in f_outputs_idx.transpose(0, 1)]  # [20, 128]
 
-                def loss_for_each_batch(outputs, labels, mode):
-                    if mode=='BCE':
-                        # output must have passed through F.SIGMOID
-                        loss = [-(torch.log(outputs[i])*(labels[i]) + torch.log(1-outputs[i])*(1-labels[i]))
-                                for i in range(outputs.size(0))]
-                        return loss
-                    elif mode=='NLL':
-                        # np.average(loss) == criterion_G(outputs) // check complete
-                        outputs = F.softmax(outputs)
-                        loss = [-(torch.log(outputs[i][1])*labels[i] + torch.log(outputs[i][0])*(1-labels[i]))
-                                for i in range(outputs.size(0))]
-                        return loss
+                    def loss_for_each_batch(outputs, labels, mode):
+                        if mode=='BCE':
+                            # output must have passed through F.SIGMOID
+                            loss = [-(torch.log(outputs[i])*(labels[i]) + torch.log(1-outputs[i])*(1-labels[i]))
+                                    for i in range(outputs.size(0))]
+                            return loss
+                        elif mode=='NLL':
+                            # np.average(loss) == criterion_G(outputs) // check complete
+                            outputs = F.softmax(outputs)
+                            loss = [-(torch.log(outputs[i][1])*labels[i] + torch.log(outputs[i][0])*(1-labels[i]))
+                                    for i in range(outputs.size(0))]
+                            return loss
 
-                    elif mode=='Acc':
-                        loss = [outputs[i][1] for i in range(outputs.size(0))]
-                        return loss
-                    else:
-                        raise Exception('mode options must be BCE or NLL.')
+                        elif mode=='Acc':
+                            loss = [outputs[i][1] for i in range(outputs.size(0))]
+                            return loss
+                        else:
+                            raise Exception('mode options must be BCE or NLL.')
 
-                #G_error_rewards = torch.cat(loss_for_each_batch(f_D_output, f_label, mode='BCE'), 0).unsqueeze(1)
-                #G_error_rewards = torch.cat(loss_for_each_batch(f_D_output, f_label, mode='NLL'), 0).unsqueeze(1)
-                G_error_rewards = torch.cat(loss_for_each_batch(f_D_output, f_label, mode='Acc'), 0).unsqueeze(1)
+                    G_error_rewards = torch.cat(loss_for_each_batch(f_D_output, f_label, mode='Acc'), 0).unsqueeze(1)
 
-                G_error_rewards = G_error_rewards.data.cpu().numpy()
-                G_error, G_rewards = np.average(G_error_rewards), torch.FloatTensor(G_error_rewards).cuda()
+                    G_error_rewards = G_error_rewards.data.cpu().numpy()
+                    G_reward_avg, G_rewards = np.average(G_error_rewards), torch.FloatTensor(G_error_rewards).cuda()
 
-                G_rewards = np.repeat(G_rewards, 20)
+                    G_rewards = np.repeat(G_rewards, 20)
 
-                # (1) All same reward version...
-                # for action in f_outputs_actions:
-                #     action.reinforce(G_rewards)
+                    # (1) All same reward version...
+                    # for action in f_outputs_actions:
+                    #     action.reinforce(G_rewards)
 
-                # (2) After End-token -> reward = 0 version..
-                for action, r in zip(f_outputs_actions, G_rewards):
-                    tmp = ((action.detach().data > 1).type('torch.cuda.FloatTensor') * r.expand(action.data.size()))
-                    action.reinforce(tmp)
+                    # (2) After End-token -> reward = 0 version..
+                    for action, idx, r in zip(f_outputs_actions, f_outputs_idx, G_rewards):
+                        tmp = ((idx.detach().data > 1).type('torch.cuda.FloatTensor') * r.expand(action.data.size()))
+                        action.reinforce(tmp)
 
-                # def get_RO_rewards(self, f_outputs_actions, K=3):
-                #     self.model_G
-                #     self.model_D
-                #
-                #     for
-                #
-                # # (3) Rollout -> Reward version..
-                # for action, r in zip(f_outputs_actions, RO_rewards):
-                #     tmp = ((action.detach().data>1).type('torch.cuda.FloatTensor') * r)
-                #     action.reinforce(tmp)
+                    torch.autograd.backward(f_outputs_actions, [None for _ in f_outputs_actions])
+                    self.G_optimizer.step()
 
 
-                torch.autograd.backward(f_outputs_actions, [None for _ in f_outputs_actions])
-                self.G_optimizer.step()
+                elif self.RewardMode == 'RollOut':
+
+                    # (3) Rollout -> Reward version..
+                    def get_RO_rewards(model_G, model_D, images, f_outputs_actions):
+                                                                 # [20 x [128, 1]]
+                        rewards_matrix = Variable(torch.FloatTensor(f_outputs_actions[0].size()[0], len(f_outputs_actions))) # [128,20]
+
+                        max_len = 20
+                        for t in range(1, max_len):
+                            input_sentences = f_outputs_actions[:t]
+                            rollout = model_G.sample_for_G_rollout(images, input_sentences, max_len)
+                            _, rollout_embeddings = model_G.pad_after_EOS(rollout)
+
+                            output = model_D(rollout_embeddings, model_G.encoder(images).detach(), iter)
+
+                            ''' Define Rewards'''
+                            reward = output[:,1]
+                            rewards_matrix[:,t-1] = reward
+
+                        return rewards_matrix.detach() # [128,20]
+
+                    rollout_rewards = get_RO_rewards(self.model_G, self.model_D, images, f_outputs_actions)     # [128, 20]
+                    rollout_rewards = [reward.unsqueeze(1).cuda() for reward in rollout_rewards.transpose(0,1)] # [20, 128]
+
+                    f_outputs_idx = [f_output_idx.unsqueeze(1) for f_output_idx in f_outputs_idx.transpose(0,1)] #[20, 128]
+
+                    for action, idx, r in zip(f_outputs_actions, f_outputs_idx, rollout_rewards):
+                        #tmp = ((action.detach().data>1).type('torch.cuda.FloatTensor') * r.data)
+                        tmp = ((idx.detach().data>1).type('torch.cuda.FloatTensor') * r.data)
+                        action.reinforce(tmp)
+
+                    torch.autograd.backward(f_outputs_actions, [None for _ in f_outputs_actions])
+
+                    G_reward_avg = [rewards.data.cpu().numpy() for rewards in rollout_rewards]
+                    G_reward_avg = np.average(np.array(G_reward_avg))
+                    self.G_optimizer.step()
+
+                else:
+                    raise NameError, 'plz check the self.RewardMode.. (enter NoRollOut or RollOut)'
 
                 torch.cuda.synchronize()
 
-
                 if iter % self.opt.log_step == 0:
                     print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f'
-                          % (epoch, self.opt.max_epochs, iter, len(self.trainloader), D_error.data[0], G_error))
-                    train_loss_history[total_iteration] = {'loss': G_error}
+                          % (epoch, self.opt.max_epochs, iter, len(self.trainloader), D_error.data[0], G_reward_avg))
+                    train_loss_history[total_iteration] = {'loss': G_reward_avg}
                     self.train_loss_win = visualize_loss(self.train_loss_win, train_loss_history, 'Adversarial train: G_rewards', 'loss')
 
                 # make evaluation on validation set, and save model
@@ -954,7 +986,7 @@ class Trainer_GAN(object):
 
                     # Write the training loss summary
                     # loss_history[total_iteration] = loss.data[0].cpu().numpy()[0]
-                    loss_history[total_iteration] = G_error
+                    loss_history[total_iteration] = G_reward_avg
                     lr_history[total_iteration] = self.opt.current_lr
 
                     # Save model if is improving on validation result
