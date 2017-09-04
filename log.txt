@@ -1,4 +1,4 @@
-2017-06-20 15:41:43 - INFO - 
+2017-09-04 14:39:53 - INFO - 
 run arguments: {
     "batch_size": 64, 
     "crop_size": 224, 

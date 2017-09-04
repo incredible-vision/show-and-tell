@@ -545,7 +545,7 @@ class ShowAttendTellModel_G(nn.Module):
 
                 # # Option 1 : Greedy search
                 predicted_greedy = output.max(1)[1]
-                outputs_greedy.append(predicted_greedy)
+                outputs_greedy.append(predicted_greedy.unsqueeze(1))
                 xt = self.embedding(predicted_greedy).squeeze(1)
                 outputs_embedding.append(xt.detach())
 
@@ -622,7 +622,7 @@ class ShowAttendTellModel_G(nn.Module):
 
             # Option 1 : Greedy search
             predicted_greedy = output.max(1)[1]
-            rollout_greedy.append(predicted_greedy)
+            rollout_greedy.append(predicted_greedy.unsqueeze(1))
             xt = self.embedding(predicted_greedy).squeeze(1)
 
         return torch.cat(rollout_greedy, 1)
