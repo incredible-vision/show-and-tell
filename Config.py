@@ -13,9 +13,9 @@ def parse_opt():
     parser.add_argument('--vocab_path', type=str, default='data/vocab.pkl', help='vocabulary wrapper')
 
     parser.add_argument('--num_gpu', type=int, default=1, help='number of gpus available, if set to 0, use cpu instead')
-    parser.add_argument('--random_seed', type=int, default=1227, help='random seed number, to reproduce the result, fix the number')
+    parser.add_argument('--random_seed', type=int, default=28, help='random seed number, to reproduce the result, fix the number')
     parser.add_argument('--crop_size', type=int, default=224, help='image crop size, spatial dimension of input to the encoder')
-    parser.add_argument('--batch_size', type=int, default=128, help='batch size for training')
+    parser.add_argument('--batch_size', type=int, default=64, help='batch size for training')
 
     parser.add_argument('--expr_dir', type=str, default='experiment', help='experiment directory')
     parser.add_argument('--exp_id', type=str, default='withGAN', help='experiment id')
@@ -32,7 +32,7 @@ def parse_opt():
     parser.add_argument('--load_optim_path', action="store_true", default=False)
     parser.add_argument('--load_pretrained', action='store_false', default=False)
 
-    parser.add_argument('--learning_rate', type=float, default=1e-6)
+    parser.add_argument('--learning_rate', type=float, default=1e-4)
     parser.add_argument('--max_epochs', type=int, default=100)
 
     parser.add_argument('--learning_rate_decay_start', type=int, default=1, help='at what iteration to start decaying learning rate? (-1 = dont) (in epoch)')

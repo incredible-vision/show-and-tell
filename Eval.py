@@ -58,6 +58,7 @@ def language_eval(preds):
 
     return out
 
+
 def evaluation(model, crit, loader, vocab, opt):
 
     model.eval()
@@ -129,3 +130,25 @@ def evaluation(model, crit, loader, vocab, opt):
     lang_stats = language_eval(predictions)
 
     return loss_sum/loss_evals, predictions, lang_stats
+
+
+def print_sentence(sampled_ids, vocab, print_idx=None):
+
+    torch.cuda.synchronize()
+
+    sampled_ids = sampled_ids.cpu().data.numpy()
+
+    sampled_caption = []
+
+    for word_id in sampled_ids:
+        word = vocab.idx2word[word_id]
+        if word == '<end>':
+            break
+        sampled_caption.append(word)
+
+    sentence = ' '.join(sampled_caption)
+
+    if print_idx is not None:
+        print("{}:{}".format(print_idx, sentence))
+    else:
+        print("{}".format(sentence))

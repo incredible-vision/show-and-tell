@@ -17,7 +17,7 @@ from DataLoader import get_loader
 from Utils import Vocabulary, visualize_loss
 from ModelSetup import model_setup, model_setup_2
 
-from Eval import evaluation
+from Eval import evaluation, print_sentence
 from Eval_SPIDEr import evaluationPolicyGradient, language_eval
 
 #from models.models1 import EncoderCNN, DecoderRNN, DecoderPolicyGradient
@@ -618,9 +618,11 @@ class Trainer_GAN(object):
                 loss = self.criterion_G(outputs, targets)
                 loss.backward()
                 clip_gradient(self.G_optimizer, self.opt.grad_clip)
+
                 self.G_optimizer.step()
 
                 torch.cuda.synchronize()
+
                 end = time.time()
 
                 if iter % self.opt.log_step == 0:
@@ -710,8 +712,6 @@ class Trainer_GAN(object):
                 # Set mini-batch dataset
                 images = Variable(images).cuda()
                 captions = Variable(captions).cuda()
-
-                lengths = [l - 1 for l in lengths]
 
                 ################################################
                 # (1) Pretrain D network
@@ -857,11 +857,6 @@ class Trainer_GAN(object):
                 D_error = f_error + r_error
                 self.D_optimizer.step()
 
-                # if D_update == 2:
-                #     self.D_optimizer.step()
-                #     D_update = 0
-                # else:
-                #     D_update += 1
 
                 # DEBUG -----------------------------------------------------
                 if 0:
@@ -937,7 +932,7 @@ class Trainer_GAN(object):
                         rewards_matrix = Variable(torch.FloatTensor(f_outputs_actions[0].size()[0], len(f_outputs_actions))) # [128,20]
 
                         max_len = 20
-                        for t in range(1, max_len):
+                        for t in range(1, max_len+1):
                             input_sentences = f_outputs_actions[:t]
                             rollout = model_G.sample_for_G_rollout(images, input_sentences, max_len)
                             _, rollout_embeddings = model_G.pad_after_EOS(rollout)
@@ -945,8 +940,15 @@ class Trainer_GAN(object):
                             output = model_D(rollout_embeddings, model_G.encoder(images).detach(), iter)
 
                             ''' Define Rewards'''
-                            reward = output[:,1]
+                            reward = F.sigmoid(output)[:,1]
                             rewards_matrix[:,t-1] = reward
+
+                            ''' Debug '''
+                            debug=True
+                            if debug == True:
+                                if t==1:
+                                    print_sentence(captions[0], self.vocab, (cocoids[0], t)) # Ground Truth sentence Print
+                                print_sentence(rollout[0], self.vocab, (cocoids[0], t, reward.data.cpu().numpy()[0])) # Rollout sentence Print
 
                         return rewards_matrix.detach() # [128,20]
 
