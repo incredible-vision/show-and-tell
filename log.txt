@@ -1,14 +1,16 @@
-2017-09-04 14:39:53 - INFO - 
+2017-09-06 14:19:08 - INFO - 
 run arguments: {
     "batch_size": 64, 
     "crop_size": 224, 
     "data_json": "data/data.json", 
     "embed_size": 512, 
-    "exp_id": "withGAN", 
-    "expr_dir": "experiment", 
+    "exp_dir": "experiment", 
+    "exp_id": "20170906_141908", 
+    "exp_type": "withGAN", 
+    "expr_dir": "experiment/withGAN/20170906_141908", 
     "grad_clip": 0.5, 
     "hidden_size": 512, 
-    "language_eval": 1, 
+    "language_eval": "CIDEr", 
     "learning_rate": 0.0001, 
     "learning_rate_decay_every": 3, 
     "learning_rate_decay_rate": 0.8, 
@@ -22,14 +24,14 @@ run arguments: {
     "max_length": 20, 
     "num_gpu": 1, 
     "num_layers": 1, 
+    "pretrained_dir": "experiment/pretrained/", 
     "random_seed": 28, 
     "root_dir": "/home/gt/PycharmProjects/show-and-tell", 
-    "save_checkpoint_every": 200, 
+    "save_checkpoint_every": 20, 
     "scheduled_sampling_increase_every": 5, 
     "scheduled_sampling_increase_prob": 0.05, 
     "scheduled_sampling_max_prob": 0.25, 
     "scheduled_sampling_start": -1, 
     "start_from": null, 
-    "user_id": "gt", 
     "vocab_path": "data/vocab.pkl"
 }

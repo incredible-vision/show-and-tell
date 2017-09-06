@@ -2,6 +2,10 @@ import os
 import json
 import pickle
 import argparse
+import torch
+from Utils import setup_logging
+import logging
+from datetime import datetime
 
 def parse_opt():
 
@@ -9,6 +13,7 @@ def parse_opt():
 
     # Data input settings
     parser.add_argument('--root_dir', type=str, default='/home/gt/PycharmProjects/show-and-tell', help="root directory")
+    parser.add_argument('--pretrained_dir', type=str, default='experiment/pretrained/')
     parser.add_argument('--data_json', type=str, default='data/data.json', help='input data list which includes captions and image information')
     parser.add_argument('--vocab_path', type=str, default='data/vocab.pkl', help='vocabulary wrapper')
 
@@ -17,9 +22,9 @@ def parse_opt():
     parser.add_argument('--crop_size', type=int, default=224, help='image crop size, spatial dimension of input to the encoder')
     parser.add_argument('--batch_size', type=int, default=64, help='batch size for training')
 
-    parser.add_argument('--expr_dir', type=str, default='experiment', help='experiment directory')
-    parser.add_argument('--exp_id', type=str, default='withGAN', help='experiment id')
-    parser.add_argument('--user_id', type=str, default='gt', help='user id')
+    parser.add_argument('--exp_dir', type=str, default='experiment', help='experiment directory')
+    parser.add_argument('--exp_type', type=str, default='withGAN', help='experiment model type')
+    parser.add_argument('--exp_id', type=str, default=datetime.today().strftime('%Y%m%d_%H%M%S'), help='experiment id')
     parser.add_argument('--start_from', type=str, default=None, help='continue from this configurations')
 
     parser.add_argument('--embed_size', type=int, default=512, help='dimension of word embedding vectors')
@@ -46,13 +51,27 @@ def parse_opt():
     parser.add_argument('--scheduled_sampling_max_prob', type=float, default=0.25, help='Maximum scheduled sampling prob.')
 
     parser.add_argument('--log_step', type=int, default=10, help='step size for prining log info')
-    parser.add_argument('--language_eval', type=int, default=1, help='1 for Cider score, 0 for log loss')
-    parser.add_argument('--save_checkpoint_every', type=int, default=200, help='how often to save a model checkpoint (in iterations)?')
+    parser.add_argument('--language_eval', type=str, default='CIDEr', help='Cider, LogLoss')
+    parser.add_argument('--save_checkpoint_every', type=int, default=20, help='how often to save a model checkpoint (in iterations)?')
     #3236
 
-    args = parser.parse_args()
+    opt = parser.parse_args()
 
-    return args
+    if not os.path.exists(os.path.join('experiment', opt.exp_type)):
+        os.makedirs(os.path.join('experiment', opt.exp_type))
+
+    opt.expr_dir = os.path.join('experiment', opt.exp_type, opt.exp_id)
+    if not os.path.exists(opt.expr_dir):
+        os.makedirs(opt.expr_dir)
+
+    torch.manual_seed(opt.random_seed)
+    if opt.num_gpu > 0:
+        torch.cuda.manual_seed(opt.random_seed)
+
+    setup_logging(os.path.join('log.txt'))
+    logging.info("\nrun arguments: %s", json.dumps(vars(opt), indent=4, sort_keys=True))
+
+    return opt
 
 
 def save_config(opt):

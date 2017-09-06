@@ -8,18 +8,16 @@ import argparse
 from PIL import Image
 import numpy as np
 from Utils import Vocabulary
+import Utils
+
 
 class CocoDataset(data.Dataset):
-
     def __init__(self, root, anns, vocab, mode='train',transform=None):
-
         self.root = root
         self.anns = json.load(open(anns))
         self.vocab = pickle.load(open(vocab, 'rb'))
         self.transform = transform
-
         self.data = [ann for ann in self.anns if ann['split'] == mode]
-
 
     def __getitem__(self, index):
         data  = self.data
@@ -45,6 +43,7 @@ class CocoDataset(data.Dataset):
     def __len__(self):
         return len(self.data)
 
+
 def collate_fn(data):
     # sort the data in descending order
     data.sort(key=lambda x: len(x[1]), reverse=True)
@@ -61,6 +60,7 @@ def collate_fn(data):
         targets[i, :end] = cap[:end]
     return images, targets, lengths, imgids
 
+
 def get_loader(opt, mode='train', shuffle=True, num_workers=1, transform=None):
 
     coco = CocoDataset(root=opt.root_dir,
@@ -75,6 +75,33 @@ def get_loader(opt, mode='train', shuffle=True, num_workers=1, transform=None):
                                               collate_fn=collate_fn)
 
     return data_loader
+
+
+def init_dataloader(opt):
+
+    dataloader = dict()
+
+    train_transform = transforms.Compose([
+        transforms.RandomCrop(opt.crop_size),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
+
+    valid_transform = transforms.Compose([
+        transforms.CenterCrop(opt.crop_size),
+        # transforms.RandomHorizontalFlip(), # do we need to flip when eval?
+        transforms.ToTensor(),
+        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
+
+    dataloader['train'] = get_loader(opt, mode='train', transform=train_transform)
+    dataloader['val'] = get_loader(opt, mode='val', transform=valid_transform)
+
+    print('load the dataset into memory...')
+    print('total iterations in training phase : {} \ntotal iterations in validation phase : {}'
+          .format(len(dataloader['train']), len(dataloader['val'])))
+
+    return dataloader
+
 
 if __name__ == "__main__":
 

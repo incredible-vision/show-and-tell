@@ -144,12 +144,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # input and output file configuration
-    parser.add_argument('--caption_json', required=True, help='input json file to create vocabulary')
+    parser.add_argument('--caption_json', type=str, default='data/datasets/dataset_coco.json', help='input json file to create vocabulary')
     parser.add_argument('--output_json', type=str, default='data/data.json', help ='save path for annotation json file with additional information')
     parser.add_argument('--vocab_path', type=str, default='data/vocab.pkl', help='path for saving vocabulary wrapper')
 
     # options
-    parser.add_argument('--images_root', required=True, help='root location in which images are stored, to be prepended to file_path in input json')
+    parser.add_argument('--images_root', type=str, default='data/', help='root location in which images are stored, to be prepended to file_path in input json')
     parser.add_argument('--word_count_threshold', default=5, type=int, help='only words that occur more than this number of times will be put in vocab')
     parser.add_argument('--print_stats', action="store_true", default=True, help='print out the stats of the mscoco captioning annotations')
 

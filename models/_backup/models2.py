@@ -642,7 +642,7 @@ class ShowAttendTellModel_G(nn.Module):
             hidden, state = self.lstm(xt.unsqueeze(0), state)
             output = self.classifier(hidden.squeeze(0))
             predicted = output.max(1)[1]
-            outputs.append(predicted)
+            outputs.append(predicted.unsqueeze(1))
             xt = self.embedding(predicted).squeeze(1)
 
         generated_sentence = torch.cat(outputs, 1)

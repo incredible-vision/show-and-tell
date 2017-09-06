@@ -1,9 +1,11 @@
-
-import os
-import json
 import logging
+
 import numpy as np
-from datetime import datetime
+import torch
+import torch.nn.functional as F
+from torch.autograd import Variable
+from Eval import print_sentence
+
 from visualizer import Visdom
 
 vis = Visdom()
@@ -21,6 +23,7 @@ def setup_logging(log_file='log.txt'):
     console.setFormatter(formatter)
     logging.getLogger('').addHandler(console)
 
+
 def visualize_loss(win, loss_history, title='loss', item_name='loss'):
     opts_loss = dict(title=title)
 
@@ -33,6 +36,7 @@ def visualize_loss(win, loss_history, title='loss', item_name='loss'):
                               Y=np.array([loss_history[loss_hist_key[-1]][item_name]]),
                               win=win)
     return win
+
 
 class Vocabulary(object):
     def __init__(self):
@@ -53,3 +57,14 @@ class Vocabulary(object):
 
     def __len__(self):
         return len(self.word2idx)
+
+
+# # DEBUG -----------------------------------------------------
+# if iter % 40 == 0:
+#     torch.set_printoptions(edgeitems=100, linewidth=160)
+#     print '*'*100
+#     print f_sentences
+#     print '*' * 100
+#     print r_sentences
+#     print '*' * 100
+# # -----------------------------------------------------------
